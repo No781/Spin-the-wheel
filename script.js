@@ -6,10 +6,10 @@
   const MAX_OPTIONS = 60;
   const FONT = '"DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif';
 
-  // Muted, natural palette: sage, terracotta, sand, dusty blue, ochre, rose, moss, clay, stone, slate.
+  // Coastal palette: sea blues, forest mosses and driftwood browns, alternating families so neighbours differ.
   const PALETTE = [
-    '#8b9b76', '#c4745a', '#d9c5a0', '#8e9aaf', '#d4a373',
-    '#b5838d', '#6b8068', '#cb997e', '#a5a58d', '#7a8a99',
+    '#4f86a0', '#6b8350', '#94653f', '#86b0bd', '#3f6149',
+    '#b8946a', '#355f7a', '#93a362', '#a9784f', '#5e9690',
   ];
 
   const DEFAULTS = [['Pizza', 3], ['Tacos', 2], ['Sushi', 2], ['Ramen', 1], ['Salad', 1]];
@@ -218,10 +218,19 @@
     theme = { card: v('--card'), ink: v('--ink'), inkSoft: v('--ink-soft'), rim: v('--rim'), peg: v('--peg'), empty: v('--bg-deep') };
   }
 
-  function inkOn(hex) {
+  function luminance(hex) {
     const n = parseInt(hex.slice(1), 16);
-    const lum = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
-    return lum > 0.6 ? '#3a342b' : '#fbf6ec';
+    const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    return 0.2126 * lin(n >> 16) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+  }
+
+  // Pick whichever of the dark/light label colours has more contrast against the slice.
+  const INK_DARK = '#1c140e';
+  const INK_LIGHT = '#f6efe0';
+  function inkOn(hex) {
+    const l = luminance(hex);
+    const contrast = (other) => (Math.max(l, other) + 0.05) / (Math.min(l, other) + 0.05);
+    return contrast(luminance(INK_DARK)) >= contrast(luminance(INK_LIGHT)) ? INK_DARK : INK_LIGHT;
   }
 
   function draw() {
@@ -726,7 +735,6 @@
   els.hub.addEventListener('click', spin);
 
   new ResizeObserver(draw).observe(els.wrap);
-  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { readTheme(); draw(); });
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
 
   /* ---------------- sending links ---------------- */
