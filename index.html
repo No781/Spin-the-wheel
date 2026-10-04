@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Spin the Wheel</title>
+  <meta name="description" content="Add your options, set their chances, and spin the wheel to choose one at random.">
+  <meta name="theme-color" content="#f1ebdf">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%234b4337'/%3E%3Cpath d='M32 32L32 6A26 26 0 0 1 58 32Z' fill='%23b5654a'/%3E%3Cpath d='M32 32L58 32A26 26 0 0 1 32 58Z' fill='%23d9c5a0'/%3E%3Cpath d='M32 32L32 58A26 26 0 0 1 6 32Z' fill='%238b9b76'/%3E%3Cpath d='M32 32L6 32A26 26 0 0 1 32 6Z' fill='%238e9aaf'/%3E%3Ccircle cx='32' cy='32' r='6' fill='%23faf6ed'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app">
+    <header class="masthead">
+      <p class="eyebrow">a small decision-maker</p>
+      <h1>Spin the <em>wheel</em></h1>
+      <p class="lede">Add your options, nudge the odds, and let fate do the rest.</p>
+    </header>
+
+    <div class="layout">
+      <section class="stage" aria-label="Wheel">
+        <div class="wheel-wrap" id="wheel-wrap">
+          <div class="pointer" id="pointer" aria-hidden="true">
+            <svg viewBox="0 0 44 56" width="100%" height="100%">
+              <path d="M22 54 C22 54 4 32 4 20 A18 18 0 0 1 40 20 C40 32 22 54 22 54Z" fill="var(--pointer)" stroke="var(--card)" stroke-width="3" stroke-linejoin="round"/>
+              <circle cx="22" cy="19" r="6" fill="var(--card)"/>
+            </svg>
+          </div>
+          <canvas id="wheel" role="img" aria-label="Spinning wheel"></canvas>
+          <button type="button" class="hub" id="hub" tabindex="-1" aria-hidden="true">Spin</button>
+        </div>
+
+        <button type="button" class="btn primary big" id="spin">Spin the wheel</button>
+        <p class="status" id="status" role="status" aria-live="polite"></p>
+
+        <div class="history" id="history" hidden>
+          <div class="history-head">
+            <h2>Recent spins</h2>
+            <button type="button" class="link" id="clear-history">Clear</button>
+          </div>
+          <ol id="history-list"></ol>
+        </div>
+      </section>
+
+      <section class="panel" aria-label="Options">
+        <div class="panel-head">
+          <h2>Options</h2>
+          <span class="count" id="count"></span>
+        </div>
+        <p class="hint">Higher weight means better odds. Set it to&nbsp;0 to sit an option out.</p>
+
+        <div class="opt-head" aria-hidden="true">
+          <span></span><span>Option</span><span>Weight</span><span>Chance</span><span></span>
+        </div>
+        <ul class="options" id="list"></ul>
+
+        <form class="add" id="add-form" autocomplete="off">
+          <input type="text" id="add-name" maxlength="60" placeholder="Add an option…" aria-label="New option name">
+          <input type="number" id="add-weight" min="0" step="any" value="1" inputmode="decimal" aria-label="New option weight" title="Weight">
+          <button type="submit" class="btn accent">Add</button>
+        </form>
+
+        <div class="tools">
+          <button type="button" class="btn ghost" id="equalize">Equalize</button>
+          <button type="button" class="btn ghost" id="share">Copy link</button>
+          <button type="button" class="btn ghost danger" id="clear">Clear all</button>
+        </div>
+
+        <div class="toggles">
+          <label class="switch">
+            <input type="checkbox" id="opt-remove">
+            <span class="track" aria-hidden="true"></span>
+            <span>Remove the winner after each spin</span>
+          </label>
+          <label class="switch">
+            <input type="checkbox" id="opt-sound" checked>
+            <span class="track" aria-hidden="true"></span>
+            <span>Sound</span>
+          </label>
+        </div>
+      </section>
+    </div>
+
+    <footer class="foot">Your options are saved in this browser only.</footer>
+  </main>
+
+  <dialog id="result" aria-labelledby="result-name">
+    <div class="result-card">
+      <div class="result-swatch" id="result-swatch"></div>
+      <p class="eyebrow" id="result-eyebrow">The wheel has spoken</p>
+      <h2 id="result-name"></h2>
+      <p class="result-chance" id="result-chance"></p>
+      <p class="result-note" id="result-note" hidden>Removed from the wheel.</p>
+      <div class="result-actions">
+        <button type="button" class="btn primary" id="result-again">Spin again</button>
+        <button type="button" class="btn ghost" id="result-close">Close</button>
+      </div>
+    </div>
+  </dialog>
+
+  <canvas id="confetti" popover="manual" aria-hidden="true"></canvas>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="script.js"></script>
+</body>
+</html>
