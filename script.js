@@ -8,8 +8,8 @@
 
   // Coastal palette: sea blues, forest mosses and driftwood browns, alternating families so neighbours differ.
   const PALETTE = [
-    '#4f86a0', '#6b8350', '#94653f', '#86b0bd', '#3f6149',
-    '#b8946a', '#355f7a', '#93a362', '#a9784f', '#5e9690',
+    '#6b8350', '#4f86a0', '#94653f', '#93a362', '#86b0bd',
+    '#3f6149', '#b8946a', '#355f7a', '#a9784f', '#5e9690',
   ];
 
   const DEFAULTS = [['Pizza', 3], ['Tacos', 2], ['Sushi', 2], ['Ramen', 1], ['Salad', 1]];

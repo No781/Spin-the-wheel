@@ -1,21 +1,22 @@
-/* Coastal theme: driftwood brown, sea blue, forest moss */
+/* Coastal theme: deep sea-blue base, forest-moss highlights, driftwood wood accents */
 :root {
   color-scheme: dark;
-  --bg: #1a1410;
-  --bg-deep: #2a2018;
-  --card: #261d16;
-  --ink: #efe6d4;
-  --ink-soft: #a89c87;
-  --line: #43342a;
-  --accent: #6ca7bb;        /* sea blue */
-  --accent-hover: #86bbcd;
-  --accent-ink: #0e1c22;
-  --sage: #7d9562;          /* forest moss */
-  --sage-ink: #14180d;
-  --rim: #4b3828;           /* weathered wood */
+  --bg: #0e1d2a;
+  --bg-deep: #172b3c;
+  --card: #15283a;
+  --ink: #e8eeec;
+  --ink-soft: #92a7b2;
+  --line: #29445a;
+  --accent: #8fae6e;        /* forest moss: key colour */
+  --accent-hover: #a5c283;
+  --accent-ink: #101a0a;
+  --sea: #5f9bb5;           /* secondary: sea blue */
+  --sea-ink: #08161f;
+  --hub: #0f202f;
+  --rim: #58412e;           /* weathered wood */
   --peg: #dcc9a4;           /* sand */
-  --pointer: #e2c595;
-  --shadow: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 14px 34px -14px rgb(0 0 0 / 0.7);
+  --pointer: #9bba78;
+  --shadow: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 14px 34px -14px rgb(0 0 0 / 0.65);
   --serif: "Fraunces", Georgia, "Times New Roman", serif;
   --sans: "DM Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
@@ -31,9 +32,9 @@ body {
   color: var(--ink);
   line-height: 1.5;
   background:
-    radial-gradient(900px 520px at 10% -8%, color-mix(in srgb, var(--sage) 22%, transparent), transparent 62%),
-    radial-gradient(820px 520px at 100% 0%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 62%),
-    radial-gradient(1200px 500px at 50% 112%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 70%),
+    radial-gradient(900px 520px at 10% -8%, color-mix(in srgb, var(--sea) 26%, transparent), transparent 62%),
+    radial-gradient(820px 520px at 100% 0%, color-mix(in srgb, var(--accent) 13%, transparent), transparent 62%),
+    radial-gradient(1200px 500px at 50% 112%, color-mix(in srgb, var(--sea) 14%, transparent), transparent 70%),
     var(--bg);
   background-repeat: no-repeat;
 }
@@ -123,7 +124,7 @@ h1 em { font-style: italic; font-weight: 500; color: var(--accent); }
   transform: translate(-50%, -50%);
   border-radius: 50%;
   border: 0;
-  background: #33271d;
+  background: var(--hub);
   color: var(--ink);
   font: 600 clamp(0.7rem, 2.2vw, 0.95rem) var(--serif);
   letter-spacing: 0.06em;
@@ -133,7 +134,7 @@ h1 em { font-style: italic; font-weight: 500; color: var(--accent); }
   transition: transform 0.2s ease, background 0.2s ease;
 }
 
-.hub:hover:not(:disabled) { transform: translate(-50%, -50%) scale(1.06); background: color-mix(in srgb, #33271d 78%, var(--accent)); }
+.hub:hover:not(:disabled) { transform: translate(-50%, -50%) scale(1.06); background: color-mix(in srgb, var(--hub) 78%, var(--accent)); }
 .hub:active:not(:disabled) { transform: translate(-50%, -50%) scale(0.97); }
 .hub:disabled { cursor: default; }
 
@@ -161,8 +162,8 @@ h1 em { font-style: italic; font-weight: 500; color: var(--accent); }
 
 .btn.big { margin-top: 30px; padding: 15px 44px; font-size: 1.1rem; font-family: var(--serif); letter-spacing: 0.01em; }
 
-.btn.accent { background: var(--sage); color: var(--sage-ink); }
-.btn.accent:hover:not(:disabled) { background: color-mix(in srgb, var(--sage) 85%, black); }
+.btn.accent { background: var(--sea); color: var(--sea-ink); }
+.btn.accent:hover:not(:disabled) { background: color-mix(in srgb, var(--sea) 85%, black); }
 
 .btn.ghost { background: transparent; border-color: var(--line); color: var(--ink); padding: 8px 14px; font-size: 0.85rem; }
 .btn.ghost:hover:not(:disabled) { border-color: var(--ink-soft); background: color-mix(in srgb, var(--ink) 5%, transparent); }
@@ -366,7 +367,7 @@ h1 em { font-style: italic; font-weight: 500; color: var(--accent); }
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
   transition: transform 0.2s cubic-bezier(.3,.8,.3,1.2);
 }
-.switch input:checked + .track { background: var(--sage); }
+.switch input:checked + .track { background: var(--sea); }
 .switch input:checked + .track::after { transform: translateX(16px); }
 .switch input:focus-visible + .track { outline: 2.5px solid var(--accent); outline-offset: 2px; }
 
@@ -385,7 +386,7 @@ dialog {
   width: 100%;
   overflow: visible;
 }
-dialog::backdrop { background: rgb(35 28 20 / 0.5); backdrop-filter: blur(3px); animation: fade 0.25s ease; }
+dialog::backdrop { background: rgb(4 12 20 / 0.62); backdrop-filter: blur(3px); animation: fade 0.25s ease; }
 dialog[open] .result-card { animation: card-in 0.45s cubic-bezier(.2,1.2,.3,1) both; }
 
 @keyframes fade { from { opacity: 0; } }
@@ -419,11 +420,11 @@ dialog[open] .result-card { animation: card-in 0.45s cubic-bezier(.2,1.2,.3,1) b
   display: block;
   width: 100%;
   margin-top: 14px;
-  background: color-mix(in srgb, var(--sage) 20%, var(--card));
-  border-color: color-mix(in srgb, var(--sage) 55%, transparent);
+  background: color-mix(in srgb, var(--sea) 20%, var(--card));
+  border-color: color-mix(in srgb, var(--sea) 55%, transparent);
   color: var(--ink);
 }
-.btn.send-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--sage) 32%, var(--card)); }
+.btn.send-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--sea) 32%, var(--card)); }
 
 #send { max-width: min(92vw, 560px); }
 .send-card {
