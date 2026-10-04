@@ -15,9 +15,9 @@
 <body>
   <main class="app">
     <header class="masthead">
-      <p class="eyebrow">a small decision-maker</p>
+      <p class="eyebrow" id="eyebrow">a small decision-maker</p>
       <h1>Spin the <em>wheel</em></h1>
-      <p class="lede">Add your options, nudge the odds, and let fate do the rest.</p>
+      <p class="lede" id="lede">Add your options, nudge the odds, and let fate do the rest.</p>
     </header>
 
     <div class="layout">
@@ -47,30 +47,37 @@
 
       <section class="panel" aria-label="Options">
         <div class="panel-head">
-          <h2>Options</h2>
+          <h2 id="panel-title">Options</h2>
           <span class="count" id="count"></span>
         </div>
-        <p class="hint">Higher weight means better odds. Set it to&nbsp;0 to sit an option out.</p>
 
-        <div class="opt-head" aria-hidden="true">
-          <span></span><span>Option</span><span>Weight</span><span>Chance</span><span></span>
+        <div id="editor">
+          <p class="hint">Higher weight means better odds. Set it to&nbsp;0 to sit an option out.</p>
+
+          <div class="opt-head" aria-hidden="true">
+            <span></span><span>Option</span><span>Weight</span><span>Chance</span><span></span>
+          </div>
+          <ul class="options" id="list"></ul>
+
+          <form class="add" id="add-form" autocomplete="off">
+            <input type="text" id="add-name" maxlength="60" placeholder="Add an option…" aria-label="New option name">
+            <input type="number" id="add-weight" min="0" step="any" value="1" inputmode="decimal" aria-label="New option weight" title="Weight">
+            <button type="submit" class="btn accent">Add</button>
+          </form>
+
+          <div class="tools">
+            <button type="button" class="btn ghost" id="equalize">Equalize</button>
+            <button type="button" class="btn ghost" id="share">Copy list link</button>
+            <button type="button" class="btn ghost danger" id="clear">Clear all</button>
+          </div>
+
+          <button type="button" class="btn send-btn" id="send-open">Send to people to spin</button>
         </div>
-        <ul class="options" id="list"></ul>
 
-        <form class="add" id="add-form" autocomplete="off">
-          <input type="text" id="add-name" maxlength="60" placeholder="Add an option…" aria-label="New option name">
-          <input type="number" id="add-weight" min="0" step="any" value="1" inputmode="decimal" aria-label="New option weight" title="Weight">
-          <button type="submit" class="btn accent">Add</button>
-        </form>
-
-        <div class="tools">
-          <button type="button" class="btn ghost" id="equalize">Equalize</button>
-          <button type="button" class="btn ghost" id="share">Copy link</button>
-          <button type="button" class="btn ghost danger" id="clear">Clear all</button>
-        </div>
+        <ul class="options viewer" id="viewer-list" hidden></ul>
 
         <div class="toggles">
-          <label class="switch">
+          <label class="switch edit-only">
             <input type="checkbox" id="opt-remove">
             <span class="track" aria-hidden="true"></span>
             <span>Remove the winner after each spin</span>
@@ -81,6 +88,8 @@
             <span>Sound</span>
           </label>
         </div>
+
+        <p class="make-own" id="make-own" hidden><a href="./">Make your own wheel &rarr;</a></p>
       </section>
     </div>
 
@@ -97,6 +106,45 @@
       <div class="result-actions">
         <button type="button" class="btn primary" id="result-again">Spin again</button>
         <button type="button" class="btn ghost" id="result-close">Close</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="send" aria-labelledby="send-title-h">
+    <div class="send-card">
+      <h2 id="send-title-h">Send to people to spin</h2>
+      <p class="send-intro">Each person gets their own link with your current list. They open it, spin, and see their result. You can look any result up here without spoiling it for them.</p>
+      <p class="send-note" id="send-file-note" hidden>You're running this from a local file. Open the deployed site to create links that work for other people.</p>
+
+      <div class="field">
+        <label for="send-title">What's being decided? <span class="opt-label">(optional)</span></label>
+        <input type="text" id="send-title" maxlength="80" placeholder="Who gets the window seat?">
+      </div>
+      <div class="field">
+        <label for="send-names">Who's spinning? <span class="opt-label">(one name per line)</span></label>
+        <textarea id="send-names" rows="4" placeholder="Alex&#10;Sam&#10;Jordan"></textarea>
+      </div>
+      <button type="button" class="btn primary" id="send-create">Create links</button>
+
+      <div id="send-out" hidden>
+        <div class="send-out-head">
+          <h3>Links</h3>
+          <button type="button" class="link" id="send-copy-all">Copy all</button>
+        </div>
+        <ul class="links" id="send-links"></ul>
+      </div>
+
+      <div class="lookup">
+        <label for="lookup-url">Have a link already? Paste it to check the result</label>
+        <div class="lookup-row">
+          <input type="text" id="lookup-url" placeholder="Paste a link…" autocomplete="off">
+          <button type="button" class="btn ghost" id="lookup-go">Check</button>
+        </div>
+        <p class="lookup-out" id="lookup-out" aria-live="polite"></p>
+      </div>
+
+      <div class="result-actions">
+        <button type="button" class="btn ghost" id="send-close">Done</button>
       </div>
     </div>
   </dialog>

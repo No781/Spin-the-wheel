@@ -26,6 +26,12 @@
     dialog: $('result'), rSwatch: $('result-swatch'), rEyebrow: $('result-eyebrow'), rName: $('result-name'),
     rChance: $('result-chance'), rNote: $('result-note'), rAgain: $('result-again'), rClose: $('result-close'),
     confetti: $('confetti'), toast: $('toast'),
+    eyebrow: $('eyebrow'), lede: $('lede'), panelTitle: $('panel-title'),
+    editor: $('editor'), viewer: $('viewer-list'), makeOwn: $('make-own'),
+    send: $('send'), sendOpen: $('send-open'), sendClose: $('send-close'), sendTitle: $('send-title'),
+    sendNames: $('send-names'), sendCreate: $('send-create'), sendOut: $('send-out'), sendLinks: $('send-links'),
+    sendCopyAll: $('send-copy-all'), sendFileNote: $('send-file-note'),
+    lookupUrl: $('lookup-url'), lookupGo: $('lookup-go'), lookupOut: $('lookup-out'),
   };
   const ctx = els.canvas.getContext('2d');
 
@@ -35,6 +41,8 @@
   let spinning = false;
   let pointerKick = 0;
   let theme = {};
+  let playMode = false; // opened from a personal link: read-only wheel with a fixed outcome
+  let playInfo = null;
 
   const mod = (a, n) => ((a % n) + n) % n;
   const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -58,6 +66,7 @@
   }
 
   function save() {
+    if (playMode) return; // never overwrite the visitor's own saved list
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         options: state.options.map((o) => [o.name, o.weight]),
@@ -78,7 +87,84 @@
     return out;
   }
 
+  /* ---------------- personal links ---------------- */
+
+  const LINK_PREFIX = '#s=';
+
+  function b64Encode(obj) {
+    let bin = '';
+    new TextEncoder().encode(JSON.stringify(obj)).forEach((b) => { bin += String.fromCharCode(b); });
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  function b64Decode(str) {
+    const bin = atob(str.replace(/-/g, '+').replace(/_/g, '/'));
+    return JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0))));
+  }
+
+  // Returns {t: title, n: name, k: seed, o: [[name, weight], ...]} or null if the payload isn't valid.
+  function parsePersonal(encoded) {
+    try {
+      const d = b64Decode(encoded);
+      if (!d || typeof d.k !== 'string' || !/^[A-Za-z0-9_-]{4,40}$/.test(d.k)) return null;
+      if (!Array.isArray(d.o) || d.o.length < 2 || d.o.length > MAX_OPTIONS) return null;
+      const o = d.o.map((r) => [String(r[0] ?? '').trim().slice(0, 60), cleanWeight(r[1])]).filter((r) => r[0] && r[1] > 0);
+      if (o.length < 2) return null;
+      return { t: String(d.t || '').slice(0, 80), n: String(d.n || '').slice(0, 40), k: d.k, o };
+    } catch (_) { return null; }
+  }
+
+  // Deterministic float in [0, 1) from a string seed (xmur3 hash feeding sfc32).
+  function seededUnit(seed) {
+    let h = 1779033703 ^ seed.length;
+    for (let i = 0; i < seed.length; i++) {
+      h = Math.imul(h ^ seed.charCodeAt(i), 3432918353);
+      h = (h << 13) | (h >>> 19);
+    }
+    const hash = () => {
+      h = Math.imul(h ^ (h >>> 16), 2246822507);
+      h = Math.imul(h ^ (h >>> 13), 3266489909);
+      return (h ^= h >>> 16) >>> 0;
+    };
+    let a = hash(), b = hash(), c = hash(), d = hash();
+    const next = () => {
+      a >>>= 0; b >>>= 0; c >>>= 0; d >>>= 0;
+      let t = (a + b) | 0;
+      a = b ^ (b >>> 9);
+      b = (c + (c << 3)) | 0;
+      c = (c << 21) | (c >>> 11);
+      d = (d + 1) | 0;
+      t = (t + d) | 0;
+      c = (c + t) | 0;
+      return (t >>> 0) / 4294967296;
+    };
+    for (let i = 0; i < 15; i++) next();
+    return next();
+  }
+
+  function pickIndex(weights, r) {
+    const total = weights.reduce((s, w) => s + w, 0);
+    let x = r * total;
+    for (let i = 0; i < weights.length; i++) {
+      if (x < weights[i]) return i;
+      x -= weights[i];
+    }
+    return weights.length - 1;
+  }
+
+  const winnerFor = (p) => p.o[pickIndex(p.o.map((r) => r[1]), seededUnit(p.k))][0];
+
   function load() {
+    if (location.hash.startsWith(LINK_PREFIX)) {
+      const info = parsePersonal(location.hash.slice(LINK_PREFIX.length));
+      if (info) {
+        playMode = true;
+        playInfo = info;
+        state.options = info.o.map(([n, w]) => makeOption(n, w));
+        return;
+      }
+    }
+
     let loaded = null;
     try {
       const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
@@ -322,13 +408,8 @@
     if (act.length < 2) { updateStatus(); return; }
 
     const total = act.reduce((s, o) => s + o.weight, 0);
-    let r = rand() * total;
-    let idx = act.length - 1;
+    const idx = pickIndex(act.map((o) => o.weight), playMode ? seededUnit(playInfo.k) : rand());
     let before = 0;
-    for (let i = 0; i < act.length; i++) {
-      if (r < act[i].weight) { idx = i; break; }
-      r -= act[i].weight;
-    }
     for (let i = 0; i < idx; i++) before += act[i].weight;
     const winner = act[idx];
     const chance = (winner.weight / total) * 100;
@@ -377,10 +458,12 @@
     setSpinning(false);
     updateStatus(`${winner.name.trim()} it is!`);
 
-    state.history.unshift({ name: winner.name.trim(), color });
-    state.history.length = Math.min(state.history.length, 12);
-    save();
-    renderHistory();
+    if (!playMode) {
+      state.history.unshift({ name: winner.name.trim(), color });
+      state.history.length = Math.min(state.history.length, 12);
+      save();
+      renderHistory();
+    }
     chime();
     showResult(winner, chance, color);
   }
@@ -395,11 +478,13 @@
     els.rName.textContent = winner.name.trim();
     els.rChance.textContent = `It had a ${fmtPct(chance)} chance.`;
     els.rSwatch.style.setProperty('--dot', color);
-    pendingRemoval = state.removeWinner ? winner.id : null;
-    els.rNote.hidden = !pendingRemoval;
+    pendingRemoval = state.removeWinner && !playMode ? winner.id : null;
+    els.rNote.textContent = playMode ? 'This link always lands on the same result.' : 'Removed from the wheel.';
+    els.rNote.hidden = !pendingRemoval && !playMode;
+    els.rAgain.hidden = playMode;
     if (typeof els.dialog.showModal === 'function') {
       els.dialog.showModal();
-      els.rAgain.focus();
+      (playMode ? els.rClose : els.rAgain).focus();
     }
     burst();
   }
@@ -644,11 +729,127 @@
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { readTheme(); draw(); });
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
 
+  /* ---------------- sending links ---------------- */
+
+  const baseUrl = () => location.href.split('#')[0];
+  const linkFor = (p) => `${baseUrl()}${LINK_PREFIX}${b64Encode(p)}`;
+
+  function newSeed() {
+    const alphabet = 'abcdefghijkmnpqrstuvwxyz23456789';
+    let s = '';
+    for (let i = 0; i < 10; i++) s += alphabet[Math.floor(rand() * alphabet.length)];
+    return s;
+  }
+
+  async function copyText(text, okMsg) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(okMsg);
+    } catch (_) {
+      window.prompt('Copy this:', text);
+    }
+  }
+
+  let createdLinks = [];
+
+  function createLinks() {
+    const act = active();
+    if (act.length < 2) { toast('Add at least two options with a weight above zero first.'); return; }
+    const names = els.sendNames.value.split(/[\n,]+/).map((n) => n.trim().slice(0, 40)).filter(Boolean).slice(0, 30);
+    if (!names.length) { toast('Add at least one name.'); els.sendNames.focus(); return; }
+    const title = els.sendTitle.value.trim().slice(0, 80);
+    const o = act.map((x) => [x.name.trim(), x.weight]);
+
+    createdLinks = names.map((n) => {
+      const p = { t: title, n, k: newSeed(), o };
+      return { name: n, url: linkFor(p), result: winnerFor(p) };
+    });
+
+    els.sendLinks.textContent = '';
+    createdLinks.forEach((l) => {
+      const li = document.createElement('li');
+      const who = document.createElement('span');
+      who.className = 'who';
+      who.textContent = l.name;
+      const copy = document.createElement('button');
+      copy.type = 'button';
+      copy.className = 'btn ghost';
+      copy.textContent = 'Copy link';
+      copy.addEventListener('click', () => copyText(l.url, `Link for ${l.name} copied.`));
+      const reveal = document.createElement('button');
+      reveal.type = 'button';
+      reveal.className = 'btn ghost';
+      reveal.textContent = 'Reveal';
+      const res = document.createElement('span');
+      res.className = 'res';
+      res.hidden = true;
+      res.textContent = l.result;
+      reveal.addEventListener('click', () => {
+        res.hidden = !res.hidden;
+        reveal.textContent = res.hidden ? 'Reveal' : 'Hide';
+      });
+      li.append(who, copy, reveal, res);
+      els.sendLinks.appendChild(li);
+    });
+    els.sendOut.hidden = false;
+    els.sendOut.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  }
+
+  function lookup() {
+    const v = els.lookupUrl.value;
+    const i = v.indexOf(LINK_PREFIX);
+    const p = i < 0 ? null : parsePersonal(v.slice(i + LINK_PREFIX.length).trim());
+    els.lookupOut.textContent = p
+      ? `${p.n || 'This link'} gets: ${winnerFor(p)}`
+      : "That doesn't look like a wheel link.";
+  }
+
+  els.sendOpen.addEventListener('click', () => {
+    els.sendFileNote.hidden = location.protocol !== 'file:';
+    if (typeof els.send.showModal === 'function') els.send.showModal();
+    els.sendNames.focus();
+  });
+  els.sendClose.addEventListener('click', () => els.send.close());
+  els.send.addEventListener('click', (e) => { if (e.target === els.send) els.send.close(); });
+  els.sendCreate.addEventListener('click', createLinks);
+  els.sendCopyAll.addEventListener('click', () => {
+    copyText(createdLinks.map((l) => `${l.name}: ${l.url}`).join('\n'), 'All links copied.');
+  });
+  els.lookupGo.addEventListener('click', lookup);
+  els.lookupUrl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); lookup(); } });
+
+  /* ---------------- recipient view ---------------- */
+
+  function setupPlay() {
+    document.body.classList.add('play');
+    els.eyebrow.textContent = playInfo.n ? `A spin for ${playInfo.n}` : 'A spin for you';
+    els.lede.textContent = playInfo.t || 'Someone sent you a wheel. Give it a spin!';
+    document.title = playInfo.t ? `${playInfo.t} · Spin the Wheel` : 'Spin the Wheel';
+    els.panelTitle.textContent = "What's on the wheel";
+    els.editor.hidden = true;
+    els.viewer.hidden = false;
+    els.makeOwn.hidden = false;
+
+    const act = active();
+    const total = act.reduce((s, o) => s + o.weight, 0);
+    const colors = colorMap();
+    act.forEach((o) => {
+      const li = document.createElement('li');
+      li.className = 'opt ro';
+      li.style.setProperty('--dot', colors.get(o.id));
+      li.innerHTML = '<span class="opt-dot" aria-hidden="true"></span><span class="opt-label-ro"></span><output class="opt-pct"></output><span class="opt-bar" aria-hidden="true"><i></i></span>';
+      li.querySelector('.opt-label-ro').textContent = o.name;
+      li.querySelector('.opt-pct').textContent = fmtPct((o.weight / total) * 100);
+      li.querySelector('.opt-bar i').style.width = `${(o.weight / total) * 100}%`;
+      els.viewer.appendChild(li);
+    });
+  }
+
   load();
   els.optRemove.checked = state.removeWinner;
   els.optSound.checked = state.sound;
   readTheme();
-  renderList();
-  renderHistory();
+  if (playMode) { setupPlay(); updateDerived(); }
+  else { renderList(); renderHistory(); }
   setPointer();
 })();
