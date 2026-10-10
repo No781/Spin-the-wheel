@@ -32,17 +32,19 @@
     sendNames: $('send-names'), sendCreate: $('send-create'), sendOut: $('send-out'), sendLinks: $('send-links'),
     sendCopyAll: $('send-copy-all'), sendFileNote: $('send-file-note'),
     lookupUrl: $('lookup-url'), lookupGo: $('lookup-go'), lookupOut: $('lookup-out'),
+    liveOpen: $('live-open'), liveBar: $('live-bar'), liveDot: $('live-dot'), liveText: $('live-text'),
+    livePeers: $('live-peers'), liveName: $('live-name'), liveCopy: $('live-copy'), liveLeave: $('live-leave'),
   };
   const ctx = els.canvas.getContext('2d');
 
   const state = { options: [], removeWinner: false, sound: true, history: [] };
-  let uid = 0;
   let rotation = 0;
   let spinning = false;
   let pointerKick = 0;
   let theme = {};
   let playMode = false; // opened from a personal link: read-only wheel with a fixed outcome
   let playInfo = null;
+  let live = null;      // set when this page is in a shared live room (see "live rooms" below)
 
   const mod = (a, n) => ((a % n) + n) % n;
   const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -58,7 +60,14 @@
 
   /* ---------------- state ---------------- */
 
-  const makeOption = (name, weight) => ({ id: ++uid, name: String(name), weight: Number(weight) });
+  const ID_ALPHABET = 'abcdefghijkmnpqrstuvwxyz23456789';
+  function randomId(n) {
+    let s = '';
+    for (let i = 0; i < n; i++) s += ID_ALPHABET[Math.floor(rand() * ID_ALPHABET.length)];
+    return s;
+  }
+
+  const makeOption = (name, weight, id) => ({ id: id || `o${randomId(7)}`, name: String(name), weight: Number(weight) });
 
   function cleanWeight(v) {
     const n = typeof v === 'number' ? v : parseFloat(v);
@@ -66,7 +75,7 @@
   }
 
   function save() {
-    if (playMode) return; // never overwrite the visitor's own saved list
+    if (playMode || live) return; // never overwrite the visitor's own saved list
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         options: state.options.map((o) => [o.name, o.weight]),
@@ -155,6 +164,10 @@
   const winnerFor = (p) => p.o[pickIndex(p.o.map((r) => r[1]), seededUnit(p.k))][0];
 
   function load() {
+    if (/^#r=[a-z0-9]{6,24}$/.test(location.hash)) {
+      live = makeLive(location.hash.slice(3));
+      return;
+    }
     if (location.hash.startsWith(LINK_PREFIX)) {
       const info = parsePersonal(location.hash.slice(LINK_PREFIX.length));
       if (info) {
@@ -396,16 +409,23 @@
     return act.length - 1;
   }
 
+  // Buttons and the editor panel are locked while spinning, and while a live room is disconnected.
+  function syncControls() {
+    const offline = !!live && !live.connected;
+    els.panel.inert = spinning || offline;
+    els.spin.disabled = spinning || offline || active().length < 2;
+    els.hub.disabled = els.spin.disabled;
+    els.spin.textContent = spinning ? 'Spinning…' : 'Spin the wheel';
+  }
+
   function setSpinning(on) {
     spinning = on;
-    els.panel.inert = on;
-    els.spin.disabled = on || active().length < 2;
-    els.hub.disabled = els.spin.disabled;
-    els.spin.textContent = on ? 'Spinning…' : 'Spin the wheel';
+    syncControls();
   }
 
   function updateStatus(text) {
     if (text != null) { els.status.textContent = text; return; }
+    if (live && !live.connected) { els.status.textContent = 'Connecting to the room…'; return; }
     els.status.textContent = active().length < 2
       ? 'Add at least two options with a weight above zero.'
       : 'Ready when you are.';
@@ -415,6 +435,10 @@
     if (spinning) return;
     const act = active();
     if (act.length < 2) { updateStatus(); return; }
+    if (live) {
+      if (live.connected) { audio(); liveSend({ t: 'spin' }); }
+      return;
+    }
 
     const total = act.reduce((s, o) => s + o.weight, 0);
     const idx = pickIndex(act.map((o) => o.weight), playMode ? seededUnit(playInfo.k) : rand());
@@ -487,9 +511,10 @@
     els.rName.textContent = winner.name.trim();
     els.rChance.textContent = `It had a ${fmtPct(chance)} chance.`;
     els.rSwatch.style.setProperty('--dot', color);
-    pendingRemoval = state.removeWinner && !playMode ? winner.id : null;
+    const removes = state.removeWinner && !playMode;
+    pendingRemoval = removes && !live ? winner.id : null; // in a live room the server removes it
     els.rNote.textContent = playMode ? 'This link always lands on the same result.' : 'Removed from the wheel.';
-    els.rNote.hidden = !pendingRemoval && !playMode;
+    els.rNote.hidden = !removes && !playMode;
     els.rAgain.hidden = playMode;
     if (typeof els.dialog.showModal === 'function') {
       els.dialog.showModal();
@@ -586,18 +611,21 @@
     <button type="button" class="opt-remove">&times;</button>
     <span class="opt-bar" aria-hidden="true"><i></i></span>`;
 
+  function rowFor(o) {
+    const li = document.createElement('li');
+    li.className = 'opt';
+    li.dataset.id = o.id;
+    li.innerHTML = ROW_HTML;
+    li.querySelector('.opt-name').value = o.name;
+    li.querySelector('.opt-weight').value = o.weight;
+    return li;
+  }
+
   function renderList() {
     els.list.textContent = '';
-    state.options.forEach((o) => {
-      const li = document.createElement('li');
-      li.className = 'opt';
-      li.dataset.id = o.id;
-      li.innerHTML = ROW_HTML;
-      li.querySelector('.opt-name').value = o.name;
-      li.querySelector('.opt-weight').value = o.weight;
-      els.list.appendChild(li);
-    });
+    state.options.forEach((o) => els.list.appendChild(rowFor(o)));
     updateDerived();
+    if (live) renderFocus();
   }
 
   function updateDerived() {
@@ -606,7 +634,7 @@
     const colors = colorMap();
 
     els.list.querySelectorAll('.opt').forEach((li) => {
-      const o = state.options.find((x) => x.id === Number(li.dataset.id));
+      const o = state.options.find((x) => x.id === li.dataset.id);
       if (!o) return;
       const on = colors.has(o.id);
       const pct = on ? (o.weight / total) * 100 : 0;
@@ -624,20 +652,18 @@
     els.canvas.setAttribute('aria-label', act.length
       ? `Wheel with ${act.length} options: ${act.map((o) => o.name.trim()).join(', ')}`
       : 'Empty wheel');
-    if (!spinning) {
-      els.spin.disabled = act.length < 2;
-      els.hub.disabled = els.spin.disabled;
-      updateStatus();
-    }
+    syncControls();
+    if (!spinning) updateStatus();
     draw();
+    if (live) renderHistory(); // slice colours follow the list, so refresh history dots too
   }
 
   els.list.addEventListener('input', (e) => {
     const li = e.target.closest('.opt');
-    const o = li && state.options.find((x) => x.id === Number(li.dataset.id));
+    const o = li && state.options.find((x) => x.id === li.dataset.id);
     if (!o) return;
-    if (e.target.matches('.opt-name')) o.name = e.target.value;
-    else if (e.target.matches('.opt-weight')) o.weight = cleanWeight(e.target.value);
+    if (e.target.matches('.opt-name')) { o.name = e.target.value; emit({ op: 'set', id: o.id, name: o.name }); }
+    else if (e.target.matches('.opt-weight')) { o.weight = cleanWeight(e.target.value); emit({ op: 'set', id: o.id, weight: o.weight }); }
     else return;
     updateDerived();
     save();
@@ -647,9 +673,10 @@
     const btn = e.target.closest('.opt-remove');
     if (!btn) return;
     const li = btn.closest('.opt');
-    const idx = state.options.findIndex((x) => x.id === Number(li.dataset.id));
+    const idx = state.options.findIndex((x) => x.id === li.dataset.id);
     if (idx < 0) return;
-    state.options.splice(idx, 1);
+    const [removed] = state.options.splice(idx, 1);
+    emit({ op: 'remove', id: removed.id });
     renderList();
     save();
     const next = els.list.querySelectorAll('.opt-remove')[Math.min(idx, state.options.length - 1)];
@@ -663,7 +690,9 @@
     if (state.options.length >= MAX_OPTIONS) { toast(`That's the maximum of ${MAX_OPTIONS} options.`); return; }
     const raw = els.addWeight.value.trim();
     const weight = raw === '' ? 1 : cleanWeight(raw);
-    state.options.push(makeOption(name, weight));
+    const added = makeOption(name, weight);
+    state.options.push(added);
+    emit({ op: 'add', id: added.id, name: added.name, weight: added.weight });
     els.addName.value = '';
     renderList();
     save();
@@ -673,6 +702,7 @@
 
   els.equalize.addEventListener('click', () => {
     state.options.forEach((o) => { o.weight = 1; });
+    emit({ op: 'equalize' });
     renderList();
     save();
     toast('All chances are now equal.');
@@ -682,6 +712,7 @@
     if (!state.options.length) return;
     if (!window.confirm('Remove all options?')) return;
     state.options = [];
+    emit({ op: 'clear' });
     renderList();
     save();
     els.addName.focus();
@@ -698,7 +729,11 @@
     }
   });
 
-  els.optRemove.addEventListener('change', () => { state.removeWinner = els.optRemove.checked; save(); });
+  els.optRemove.addEventListener('change', () => {
+    state.removeWinner = els.optRemove.checked;
+    emit({ op: 'setting', removeWinner: state.removeWinner });
+    save();
+  });
   els.optSound.addEventListener('change', () => { state.sound = els.optSound.checked; save(); });
 
   /* ---------------- history ---------------- */
@@ -709,7 +744,7 @@
     state.history.forEach((h) => {
       const li = document.createElement('li');
       const dot = document.createElement('i');
-      dot.style.background = h.color;
+      dot.style.background = h.color || (live && colorMap().get(h.optId)) || PALETTE[0];
       const name = document.createElement('span');
       name.textContent = h.name;
       li.append(dot, name);
@@ -742,12 +777,7 @@
   const baseUrl = () => location.href.split('#')[0];
   const linkFor = (p) => `${baseUrl()}${LINK_PREFIX}${b64Encode(p)}`;
 
-  function newSeed() {
-    const alphabet = 'abcdefghijkmnpqrstuvwxyz23456789';
-    let s = '';
-    for (let i = 0; i < 10; i++) s += alphabet[Math.floor(rand() * alphabet.length)];
-    return s;
-  }
+  const newSeed = () => randomId(10);
 
   async function copyText(text, okMsg) {
     try {
@@ -853,11 +883,330 @@
     });
   }
 
+  /* ---------------- live rooms ---------------- */
+
+  // A live room is a wheel shared through the server. The server owns the options and picks every
+  // winner; clients send edits, receive everyone else's, and animate the same spin from the same
+  // start time so it lands together on every screen.
+
+  const NAME_KEY = 'spin-the-wheel:name';
+  const ADJECTIVES = ['Mossy', 'Salty', 'Misty', 'Tidal', 'Sandy', 'Breezy', 'Rusty', 'Calm', 'Sunny', 'Wild'];
+  const CREATURES = ['Otter', 'Heron', 'Gull', 'Seal', 'Crab', 'Puffin', 'Pelican', 'Whale', 'Fox', 'Stag'];
+  const pickOne = (list) => list[Math.floor(rand() * list.length)];
+
+  function makeLive(roomId) {
+    let name = '';
+    try { name = localStorage.getItem(NAME_KEY) || ''; } catch (_) { /* storage unavailable */ }
+    return {
+      roomId, name: name || `${pickOne(ADJECTIVES)} ${pickOne(CREATURES)}`,
+      you: null, ws: null, connected: false, everConnected: false, closing: false,
+      peers: [], focus: new Map(), seq: 0, retry: 0, timer: 0,
+      offset: 0, bestRtt: Infinity, // serverTime ~= Date.now() + offset
+      seed: null,                   // list to create the room with (only when this page created it)
+    };
+  }
+
+  const peerColor = (id) => PALETTE[parseInt(id.slice(0, 4), 16) % PALETTE.length];
+  const inviteUrl = () => `${baseUrl()}#r=${live.roomId}`;
+
+  function liveSend(msg) {
+    if (live && live.ws && live.ws.readyState === 1) live.ws.send(JSON.stringify(msg));
+  }
+
+  // Sends an edit to the room (no-op when not live). The local state is already updated.
+  function emit(op) {
+    if (live) liveSend({ t: 'op', op });
+  }
+
+  function setupLive() {
+    document.body.classList.add('live');
+    els.eyebrow.textContent = 'a live room';
+    els.lede.textContent = 'Everyone here edits the same wheel and sees every spin land together.';
+    els.liveBar.hidden = false;
+    els.liveName.value = live.name;
+    renderLive();
+    syncControls();
+  }
+
+  function leaveLive(message) {
+    if (live) {
+      live.closing = true;
+      clearTimeout(live.timer);
+      if (live.ws) live.ws.close();
+    }
+    if (message) toast(message);
+    setTimeout(() => { history.replaceState(null, '', baseUrl()); location.reload(); }, message ? 1700 : 0);
+  }
+
+  function liveConnect() {
+    const url = window.SPIN_WS_URL || `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`;
+    let ws;
+    try { ws = new WebSocket(url); } catch (_) { return leaveLive("Couldn't reach the live server."); }
+    live.ws = ws;
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({
+        t: 'join', room: live.roomId, name: live.name, create: !!live.seed, seed: live.seed,
+      }));
+      // a few pings so we can estimate the clock difference to the server
+      for (let i = 0; i < 4; i++) setTimeout(() => liveSend({ t: 'ping', c: Date.now() }), i * 200);
+    };
+    ws.onmessage = (e) => {
+      let msg;
+      try { msg = JSON.parse(e.data); } catch (_) { return; }
+      onLiveMessage(msg);
+    };
+    ws.onclose = () => {
+      if (live.closing || live.ws !== ws) return;
+      live.connected = false;
+      live.peers = [];
+      renderLive();
+      syncControls();
+      updateStatus();
+      if (!live.everConnected && live.retry >= 2) { leaveLive("Couldn't reach the live server."); return; }
+      live.timer = setTimeout(liveConnect, Math.min(10000, 800 * 2 ** live.retry++));
+    };
+    ws.onerror = () => { /* onclose follows */ };
+  }
+
+  function onLiveMessage(m) {
+    switch (m.t) {
+      case 'welcome':
+        live.you = m.you;
+        live.connected = true;
+        live.everConnected = true;
+        live.retry = 0;
+        live.seed = null;
+        live.peers = m.peers;
+        if (live.bestRtt === Infinity) live.offset = m.now - Date.now();
+        rebuildFocus();
+        applySnapshot(m.room);
+        renderLive();
+        syncControls();
+        break;
+      case 'snapshot':
+        applySnapshot(m.room);
+        break;
+      case 'pong': {
+        const rtt = Date.now() - m.c;
+        if (rtt < live.bestRtt) { live.bestRtt = rtt; live.offset = m.s + rtt / 2 - Date.now(); }
+        break;
+      }
+      case 'peers':
+        live.peers = m.peers;
+        rebuildFocus();
+        renderLive();
+        break;
+      case 'focus':
+        if (m.id) live.focus.set(m.by, m.id); else live.focus.delete(m.by);
+        renderFocus();
+        break;
+      case 'op':
+        if (m.seq > live.seq + 1) { liveSend({ t: 'sync' }); break; } // missed something: ask for a fresh copy
+        live.seq = Math.max(live.seq, m.seq);
+        if (m.by !== live.you) applyRemoteOp(m.op);
+        break;
+      case 'spin':
+        if (!spinning) runLiveSpin(m.spin);
+        break;
+      case 'spinEnd':
+        live.seq = Math.max(live.seq, m.seq);
+        state.history.unshift(m.item);
+        state.history.length = Math.min(state.history.length, 12);
+        renderHistory();
+        if (m.removed) applyRemoteOp({ op: 'remove', id: m.removed });
+        break;
+      case 'error':
+        if (m.code === 'notfound') leaveLive("That room doesn't exist any more.");
+        else if (m.code === 'badroom') leaveLive("That isn't a valid room link.");
+        else if (m.code === 'full' || m.code === 'roomfull') leaveLive('That room is full right now.');
+        else if (m.code === 'spinning') toast('Hold on, the wheel is spinning.');
+        else if (m.code === 'need2') updateStatus();
+        break;
+      default:
+    }
+  }
+
+  function applySnapshot(room) {
+    state.options = room.options.map((o) => makeOption(o.name, o.weight, o.id));
+    state.removeWinner = !!room.removeWinner;
+    state.history = room.history.slice(0, 12);
+    live.seq = room.seq;
+    els.optRemove.checked = state.removeWinner;
+    if (!spinning) rotation = room.rot;
+    renderList();
+    renderHistory();
+    if (room.spin && !spinning) runLiveSpin(room.spin);
+  }
+
+  function setInputValue(input, value) {
+    const text = String(value);
+    if (input.value === text) return;
+    const keepCaret = document.activeElement === input && input.type === 'text';
+    const [a, b] = keepCaret ? [input.selectionStart, input.selectionEnd] : [0, 0];
+    input.value = text;
+    if (keepCaret) input.setSelectionRange(Math.min(a, text.length), Math.min(b, text.length));
+  }
+
+  // Applies an edit made by someone else, touching as little DOM as possible so typing isn't disturbed.
+  function applyRemoteOp(op) {
+    switch (op.op) {
+      case 'add':
+        if (state.options.some((o) => o.id === op.id)) return;
+        state.options.push(makeOption(op.name, op.weight, op.id));
+        els.list.appendChild(rowFor(state.options[state.options.length - 1]));
+        break;
+      case 'set': {
+        const o = state.options.find((x) => x.id === op.id);
+        const li = els.list.querySelector(`.opt[data-id="${op.id}"]`);
+        if (!o || !li) return;
+        if ('name' in op) { o.name = op.name; setInputValue(li.querySelector('.opt-name'), op.name); }
+        if ('weight' in op) { o.weight = op.weight; setInputValue(li.querySelector('.opt-weight'), op.weight); }
+        break;
+      }
+      case 'remove': {
+        const i = state.options.findIndex((x) => x.id === op.id);
+        if (i < 0) return;
+        state.options.splice(i, 1);
+        const li = els.list.querySelector(`.opt[data-id="${op.id}"]`);
+        if (li) li.remove();
+        break;
+      }
+      case 'equalize':
+        state.options.forEach((o) => { o.weight = 1; });
+        renderList();
+        return;
+      case 'clear':
+        state.options = [];
+        renderList();
+        return;
+      case 'setting':
+        state.removeWinner = !!op.removeWinner;
+        els.optRemove.checked = state.removeWinner;
+        break;
+      default:
+        return;
+    }
+    updateDerived();
+  }
+
+  // Animates a spin the server started, so it matches every other screen in the room.
+  function runLiveSpin(sp) {
+    const act = active();
+    const total = act.reduce((s, o) => s + o.weight, 0);
+    const w = act.find((o) => o.id === sp.winnerId);
+    const winner = { id: sp.winnerId, name: sp.winnerName };
+    const chance = w && total ? (w.weight / total) * 100 : 0;
+    const color = colorMap().get(sp.winnerId) || PALETTE[0];
+    const reduced = prefersReducedMotion();
+    const delta = reduced ? mod(sp.delta, TAU) : sp.delta; // same final angle, without the long spin
+    const duration = reduced ? 1100 : sp.duration;
+
+    audio();
+    setSpinning(true);
+    updateStatus(`${sp.byName || 'Someone'} spun the wheel…`);
+    rotation = sp.fromRot;
+
+    let last = performance.now();
+    let lastIdx = sliceIndexAt(mod(-Math.PI / 2 - sp.fromRot, TAU), act, total);
+
+    function frame(now) {
+      const t = Math.min(1, Math.max(0, (Date.now() + live.offset - sp.startAt) / duration));
+      rotation = sp.fromRot + delta * easeOut(t);
+
+      const i = sliceIndexAt(mod(-Math.PI / 2 - rotation, TAU), act, total);
+      if (i !== lastIdx) { lastIdx = i; pointerKick = 1; tick(); }
+      pointerKick = Math.max(0, pointerKick - (now - last) / 110);
+      last = now;
+      setPointer();
+      draw();
+
+      if (t < 1) { requestAnimationFrame(frame); return; }
+      rotation = mod(sp.fromRot + sp.delta, TAU);
+      pointerKick = 0;
+      setPointer();
+      setSpinning(false);
+      updateStatus(`${winner.name} it is!`);
+      chime();
+      showResult(winner, chance, color);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  /* presence */
+
+  function rebuildFocus() {
+    live.focus = new Map(live.peers.filter((p) => p.focus).map((p) => [p.id, p.focus]));
+    renderFocus();
+  }
+
+  // Shows who else is editing which row.
+  function renderFocus() {
+    els.list.querySelectorAll('.opt[data-editor]').forEach((li) => li.removeAttribute('data-editor'));
+    live.focus.forEach((optId, peerId) => {
+      if (peerId === live.you) return;
+      const peer = live.peers.find((p) => p.id === peerId);
+      const li = els.list.querySelector(`.opt[data-id="${optId}"]`);
+      if (peer && li) li.dataset.editor = peer.name;
+    });
+  }
+
+  function renderLive() {
+    els.liveDot.classList.toggle('on', live.connected);
+    els.liveText.textContent = live.connected
+      ? `Live room · ${live.peers.length} here`
+      : (live.everConnected ? 'Reconnecting…' : 'Connecting…');
+    els.livePeers.textContent = '';
+    live.peers.forEach((p) => {
+      const li = document.createElement('li');
+      li.className = 'peer';
+      const avatar = document.createElement('i');
+      avatar.textContent = ([...p.name][0] || '?').toUpperCase();
+      avatar.style.setProperty('--c', peerColor(p.id));
+      const name = document.createElement('span');
+      name.textContent = p.id === live.you ? `${p.name} (you)` : p.name;
+      li.append(avatar, name);
+      els.livePeers.appendChild(li);
+    });
+  }
+
+  els.list.addEventListener('focusin', (e) => {
+    const li = e.target.closest('.opt');
+    if (live && li) liveSend({ t: 'focus', id: li.dataset.id });
+  });
+  els.list.addEventListener('focusout', () => { if (live) liveSend({ t: 'focus', id: null }); });
+
+  els.liveName.addEventListener('input', () => {
+    if (!live) return;
+    live.name = els.liveName.value.trim().slice(0, 24) || 'Guest';
+    try { localStorage.setItem(NAME_KEY, live.name); } catch (_) { /* storage unavailable */ }
+    liveSend({ t: 'name', name: live.name });
+  });
+  els.liveCopy.addEventListener('click', () => copyText(inviteUrl(), 'Invite link copied.'));
+  els.liveLeave.addEventListener('click', () => leaveLive());
+
+  // Turns the wheel you're looking at into a live room and puts you in it.
+  els.liveOpen.addEventListener('click', () => {
+    if (location.protocol === 'file:') { toast('Open the site from your server to go live.'); return; }
+    if (live) return;
+    live = makeLive(randomId(10));
+    live.seed = { options: state.options.map((o) => [o.name, o.weight, o.id]), removeWinner: state.removeWinner };
+    history.replaceState(null, '', inviteUrl());
+    setupLive();
+    liveConnect();
+  });
+
   load();
   els.optRemove.checked = state.removeWinner;
   els.optSound.checked = state.sound;
   readTheme();
-  if (playMode) { setupPlay(); updateDerived(); }
-  else { renderList(); renderHistory(); }
+  if (playMode) {
+    setupPlay();
+    updateDerived();
+  } else {
+    renderList();
+    renderHistory();
+    if (live) { setupLive(); liveConnect(); }
+  }
   setPointer();
 })();

@@ -416,10 +416,11 @@ dialog[open] .result-card { animation: card-in 0.45s cubic-bezier(.2,1.2,.3,1) b
 
 /* ---------- sharing: send dialog + play mode ---------- */
 
+.big-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-top: 14px; }
+
 .btn.send-btn {
   display: block;
   width: 100%;
-  margin-top: 14px;
   background: color-mix(in srgb, var(--sea) 20%, var(--card));
   border-color: color-mix(in srgb, var(--sea) 55%, transparent);
   color: var(--ink);
@@ -501,6 +502,62 @@ dialog[open] .result-card { animation: card-in 0.45s cubic-bezier(.2,1.2,.3,1) b
 
 body.play .edit-only, body.play .foot { display: none; }
 body.play .toggles { margin-top: 18px; padding-top: 14px; }
+
+/* ---------- live rooms ---------- */
+
+.side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+.live-bar {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 14px 18px 16px;
+  box-shadow: var(--shadow);
+}
+.live-bar[hidden] { display: none; }
+.live-top { display: flex; align-items: center; gap: 10px; }
+.live-top strong { font: 600 1rem var(--serif); flex: 1; }
+
+.live-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ink-soft); flex: none; }
+.live-dot.on { background: var(--accent); box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent); animation: live-pulse 2.2s ease-out infinite; }
+@keyframes live-pulse { 70% { box-shadow: 0 0 0 9px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+
+.peers { list-style: none; margin: 12px 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.peer {
+  display: inline-flex; align-items: center; gap: 7px; max-width: 100%;
+  padding: 3px 12px 3px 4px;
+  background: color-mix(in srgb, var(--bg) 55%, var(--card));
+  border-radius: 999px;
+  font-size: 0.85rem;
+}
+.peer i {
+  display: grid; place-items: center; flex: none;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--c, var(--sea));
+  color: #101810; font: 700 0.72rem var(--sans); font-style: normal;
+}
+.peer span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.live-row { display: flex; gap: 8px; }
+.live-row input {
+  flex: 1; min-width: 0;
+  font: 500 0.9rem var(--sans); color: var(--ink);
+  background: var(--bg); border: 1.5px solid var(--line); border-radius: 999px; padding: 7px 14px;
+}
+.live-row input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+
+/* a small tag on the row somebody else is editing */
+.opt[data-editor] { border-color: var(--sea); }
+.opt[data-editor]::after {
+  content: attr(data-editor);
+  position: absolute; right: 14px; top: -9px;
+  max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 1px 9px; border-radius: 999px;
+  background: var(--sea); color: var(--sea-ink);
+  font: 600 0.68rem var(--sans);
+}
+
+body.live .solo-only, body.live #clear-history, body.live .foot { display: none; }
 
 /* ---------- confetti + toast ---------- */
 
