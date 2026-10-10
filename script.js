@@ -34,6 +34,7 @@
     lookupUrl: $('lookup-url'), lookupGo: $('lookup-go'), lookupOut: $('lookup-out'),
     liveOpen: $('live-open'), liveBar: $('live-bar'), liveDot: $('live-dot'), liveText: $('live-text'),
     livePeers: $('live-peers'), liveName: $('live-name'), liveCopy: $('live-copy'), liveLeave: $('live-leave'),
+    liveRtt: $('live-rtt'), liveReact: $('live-react'), liveActivity: $('live-activity'), reactions: $('reactions'),
   };
   const ctx = els.canvas.getContext('2d');
 
@@ -901,6 +902,7 @@
       roomId, name: name || `${pickOne(ADJECTIVES)} ${pickOne(CREATURES)}`,
       you: null, ws: null, connected: false, everConnected: false, closing: false,
       peers: [], focus: new Map(), seq: 0, retry: 0, timer: 0,
+      rtt: 0, log: [], lastReact: 0,
       offset: 0, bestRtt: Infinity, // serverTime ~= Date.now() + offset
       seed: null,                   // list to create the room with (only when this page created it)
     };
@@ -924,6 +926,15 @@
     els.lede.textContent = 'Everyone here edits the same wheel and sees every spin land together.';
     els.liveBar.hidden = false;
     els.liveName.value = live.name;
+    REACTIONS.forEach(([emoji, label], i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = emoji;
+      b.setAttribute('aria-label', label);
+      b.title = label;
+      b.addEventListener('click', () => sendReaction(i));
+      els.liveReact.appendChild(b);
+    });
     renderLive();
     syncControls();
   }
@@ -981,6 +992,8 @@
         if (live.bestRtt === Infinity) live.offset = m.now - Date.now();
         rebuildFocus();
         applySnapshot(m.room);
+        myStatus = 'active';                     // the server starts everyone as active...
+        if (document.hidden) setMyStatus('away'); // ...so correct it if this tab is in the background
         renderLive();
         syncControls();
         break;
@@ -989,28 +1002,54 @@
         break;
       case 'pong': {
         const rtt = Date.now() - m.c;
+        live.rtt = rtt;
+        els.liveRtt.textContent = `${Math.round(rtt)} ms`;
         if (rtt < live.bestRtt) { live.bestRtt = rtt; live.offset = m.s + rtt / 2 - Date.now(); }
         break;
       }
-      case 'peers':
+      case 'peers': {
+        const before = new Map(live.peers.map((p) => [p.id, p.name]));
         live.peers = m.peers;
+        const after = new Set(m.peers.map((p) => p.id));
+        m.peers.forEach((p) => { if (!before.has(p.id) && p.id !== live.you) { logActivity(`join:${p.id}`, `${p.name} joined`); pulsePeer(p.id); } });
+        before.forEach((name, id) => { if (!after.has(id)) { logActivity(`left:${id}`, `${name} left`); live.focus.delete(id); } });
         rebuildFocus();
         renderLive();
+        break;
+      }
+      case 'presence': {
+        const p = live.peers.find((x) => x.id === m.id);
+        if (p) { p.status = m.status; p.since = m.since; renderLive(); }
+        break;
+      }
+      case 'react':
+        showReaction(m.by, m.i);
         break;
       case 'focus':
         if (m.id) live.focus.set(m.by, m.id); else live.focus.delete(m.by);
         renderFocus();
+        renderLive();
+        if (m.id) pulsePeer(m.by);
         break;
       case 'op':
         if (m.seq > live.seq + 1) { liveSend({ t: 'sync' }); break; } // missed something: ask for a fresh copy
         live.seq = Math.max(live.seq, m.seq);
-        if (m.by !== live.you) applyRemoteOp(m.op);
+        if (m.by !== live.you) {
+          const note = describeOp(m.op, peerName(m.by)); // describe before applying, while the old state is still there
+          applyRemoteOp(m.op);
+          logActivity(note.key, note.text);
+          pulsePeer(m.by);
+          flashRow(m.op, m.by);
+        }
         break;
       case 'spin':
+        logActivity(`spin:${m.spin.id}`, `${m.spin.byName || 'Someone'} spun the wheel`);
+        pulsePeer(m.spin.by);
         if (!spinning) runLiveSpin(m.spin);
         break;
       case 'spinEnd':
         live.seq = Math.max(live.seq, m.seq);
+        logActivity(`won:${m.item.at}`, `${m.item.name} won`);
         state.history.unshift(m.item);
         state.history.length = Math.min(state.history.length, 12);
         renderHistory();
@@ -1156,25 +1195,189 @@
     els.liveText.textContent = live.connected
       ? `Live room · ${live.peers.length} here`
       : (live.everConnected ? 'Reconnecting…' : 'Connecting…');
+    if (!live.connected) els.liveRtt.textContent = '';
+
+    // you first, then whoever is most present
+    const rank = { active: 0, idle: 1, away: 2 };
+    const sorted = [...live.peers].sort((x, y) =>
+      (y.id === live.you) - (x.id === live.you) || rank[x.status] - rank[y.status]);
+    const SHOW = 8;
+
     els.livePeers.textContent = '';
-    live.peers.forEach((p) => {
+    sorted.slice(0, SHOW).forEach((p) => {
+      const editing = live.focus.has(p.id) && p.status === 'active';
       const li = document.createElement('li');
-      li.className = 'peer';
-      const avatar = document.createElement('i');
+      li.className = `peer is-${p.status}${editing ? ' is-editing' : ''}`;
+      li.dataset.id = p.id;
+      li.style.setProperty('--c', peerColor(p.id));
+      const avatar = document.createElement('span');
+      avatar.className = 'avatar';
       avatar.textContent = ([...p.name][0] || '?').toUpperCase();
-      avatar.style.setProperty('--c', peerColor(p.id));
-      const name = document.createElement('span');
+      const who = document.createElement('span');
+      who.className = 'who';
+      const name = document.createElement('strong');
       name.textContent = p.id === live.you ? `${p.name} (you)` : p.name;
-      li.append(avatar, name);
+      const sub = document.createElement('small');
+      sub.textContent = peerLabel(p);
+      who.append(name, sub);
+      li.append(avatar, who);
       els.livePeers.appendChild(li);
     });
+    if (sorted.length > SHOW) {
+      const more = document.createElement('li');
+      more.className = 'peers-more';
+      more.textContent = `+ ${sorted.length - SHOW} more`;
+      els.livePeers.appendChild(more);
+    }
+  }
+
+  /* presence: online / idle / away, without needing a mouse (works the same on a phone) */
+
+  const REACTIONS = [['👋', 'Wave'], ['🎉', 'Celebrate'], ['🤞', 'Fingers crossed'], ['😂', 'Laugh'], ['❤️', 'Love'], ['👀', 'Watching']];
+  const IDLE_MS = Number(window.SPIN_IDLE_MS) || 45000; // no touch/key/scroll for this long = idle
+  let myStatus = 'active';
+
+  const serverNow = () => Date.now() + live.offset;
+  const peerName = (id) => (live.peers.find((p) => p.id === id) || {}).name || 'Someone';
+
+  function ago(ms) {
+    const sec = Math.max(0, Math.round(ms / 1000));
+    if (sec < 60) return `${sec}s`;
+    const min = Math.floor(sec / 60);
+    return min < 60 ? `${min}m` : `${Math.floor(min / 60)}h`;
+  }
+
+  function peerLabel(p) {
+    const optId = live.focus.get(p.id);
+    const opt = optId && state.options.find((o) => o.id === optId);
+    if (opt && p.status === 'active') return `editing ${opt.name.trim() || 'an option'}`;
+    if (p.status === 'away') return `away · ${ago(serverNow() - (p.since || 0))}`;
+    if (p.status === 'idle') return `idle · ${ago(serverNow() - (p.since || 0))}`;
+    return 'active now';
+  }
+
+  function setMyStatus(next) {
+    if (!live || myStatus === next) return;
+    myStatus = next;
+    liveSend({ t: 'status', s: next });
+    const me = live.peers.find((p) => p.id === live.you);
+    if (me) { me.status = next; me.since = serverNow(); renderLive(); }
+  }
+
+  let lastInput = Date.now();
+  function noteActivity() {
+    lastInput = Date.now();
+    if (live && !document.hidden) setMyStatus('active');
+  }
+  // touch, keyboard, scroll and pointer all count, so a phone user tapping or scrolling is "active"
+  ['pointerdown', 'pointermove', 'keydown', 'touchstart', 'touchmove', 'scroll', 'wheel', 'input'].forEach((ev) => {
+    window.addEventListener(ev, noteActivity, { passive: true, capture: true });
+  });
+  // a hidden tab or a locked phone is "away"
+  document.addEventListener('visibilitychange', () => {
+    if (!live) return;
+    if (document.hidden) setMyStatus('away'); else noteActivity();
+  });
+  window.addEventListener('pagehide', () => { if (live) liveSend({ t: 'status', s: 'away' }); });
+
+  setInterval(() => {
+    if (!live || !live.connected) return;
+    if (myStatus === 'active' && Date.now() - lastInput > IDLE_MS) setMyStatus('idle');
+    liveSend({ t: 'ping', c: Date.now() }); // keeps the connection warm and measures latency
+  }, Math.min(10000, Math.max(500, IDLE_MS / 3)));
+
+  setInterval(() => { if (live && live.connected) renderLive(); }, 10000); // keeps "idle · 2m" fresh
+
+  /* activity: a pulse on whoever just did something, a flash on the row they changed, a short feed */
+
+  function pulsePeer(id) {
+    const el = els.livePeers.querySelector(`.peer[data-id="${id}"]`);
+    if (!el) return;
+    el.classList.remove('pulse');
+    void el.offsetWidth; // restart the animation
+    el.classList.add('pulse');
+  }
+
+  function flashRow(op, by) {
+    if (op.op !== 'set' && op.op !== 'add') return;
+    const li = els.list.querySelector(`.opt[data-id="${op.id}"]`);
+    if (!li) return;
+    li.style.setProperty('--c', peerColor(by));
+    li.classList.remove('flash');
+    void li.offsetWidth;
+    li.classList.add('flash');
+  }
+
+  function describeOp(op, who) {
+    const opt = state.options.find((o) => o.id === op.id);
+    const label = (opt && opt.name.trim()) || 'an option';
+    switch (op.op) {
+      case 'add': return { key: `add:${op.id}`, text: `${who} added “${op.name.trim() || 'a new option'}”` };
+      case 'remove': return { key: `rm:${op.id}`, text: `${who} removed “${label}”` };
+      case 'equalize': return { key: 'eq', text: `${who} equalized the chances` };
+      case 'clear': return { key: 'clear', text: `${who} cleared the wheel` };
+      case 'setting': return { key: 'setting', text: `${who} turned remove-the-winner ${op.removeWinner ? 'on' : 'off'}` };
+      case 'set':
+        return 'weight' in op
+          ? { key: `w:${who}:${op.id}`, text: `${who} set “${label}” to ${op.weight}` }
+          : { key: `n:${who}:${op.id}`, text: `${who} renamed an option to “${(op.name || '').trim() || '…'}”` };
+      default: return { key: 'op', text: `${who} changed the wheel` };
+    }
+  }
+
+  // Newest first, three lines. A burst of the same change (typing a name) updates one line instead of flooding.
+  function logActivity(key, text) {
+    const now = Date.now();
+    const head = live.log[0];
+    if (head && head.key === key && now - head.at < 4000) { head.text = text; head.at = now; }
+    else live.log.unshift({ key, text, at: now });
+    live.log.length = Math.min(live.log.length, 3);
+    els.liveActivity.textContent = '';
+    live.log.forEach((entry) => {
+      const li = document.createElement('li');
+      li.textContent = entry.text;
+      els.liveActivity.appendChild(li);
+    });
+  }
+
+  function sendReaction(i) {
+    const now = Date.now();
+    if (!live || !live.connected || now - live.lastReact < 350) return;
+    live.lastReact = now;
+    liveSend({ t: 'react', i });
+    showReaction(live.you, i);
+  }
+
+  function showReaction(by, i) {
+    if (!REACTIONS[i]) return;
+    pulsePeer(by);
+    if (els.reactions.childElementCount > 30) return;
+    const el = document.createElement('div');
+    el.className = 'float';
+    el.style.left = `${12 + Math.random() * 70}%`;
+    el.style.setProperty('--drift', Math.round((Math.random() - 0.5) * 60));
+    const emoji = document.createElement('span');
+    emoji.textContent = REACTIONS[i][0];
+    const who = document.createElement('small');
+    who.textContent = by === live.you ? 'You' : peerName(by);
+    el.append(emoji, who);
+    el.addEventListener('animationend', () => el.remove());
+    els.reactions.appendChild(el);
   }
 
   els.list.addEventListener('focusin', (e) => {
     const li = e.target.closest('.opt');
-    if (live && li) liveSend({ t: 'focus', id: li.dataset.id });
+    if (!live || !li) return;
+    liveSend({ t: 'focus', id: li.dataset.id });
+    live.focus.set(live.you, li.dataset.id);
+    renderLive();
   });
-  els.list.addEventListener('focusout', () => { if (live) liveSend({ t: 'focus', id: null }); });
+  els.list.addEventListener('focusout', () => {
+    if (!live) return;
+    liveSend({ t: 'focus', id: null });
+    live.focus.delete(live.you);
+    renderLive();
+  });
 
   els.liveName.addEventListener('input', () => {
     if (!live) return;

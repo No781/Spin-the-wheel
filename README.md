@@ -19,6 +19,9 @@ Click **Go live together** to turn the wheel you're looking at into a room, then
 - anyone can press spin. The **server** picks the winner with a cryptographic random draw and tells every client the same animation (start time, duration, final angle), so the wheel lands together and nobody can predict or fudge it
 - the options are locked while the wheel is turning, and results go into a shared history
 - "remove the winner" is a shared room setting handled by the server
+- **presence that works on phones too** (no mouse needed): each person shows as *active*, *idle* (no touch, key or scroll for 45 s) or *away* (tab hidden or phone locked) with how long, plus *editing Pizza* while they have a field focused. Their avatar pulses and the row they change flashes in their colour whenever they do something
+- tap-to-send emoji reactions (👋 🎉 🤞 😂 ❤️ 👀) float up over everyone's wheel with the sender's name
+- a short live feed ("Bob set Pizza to 9", "Sam joined") and a latency readout (for example `42 ms`) that proves the connection is live
 - rooms are saved to disk, survive restarts, and are deleted after 30 days of inactivity
 - clients reconnect automatically if the connection drops
 

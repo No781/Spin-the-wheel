@@ -30,6 +30,7 @@
             </svg>
           </div>
           <canvas id="wheel" role="img" aria-label="Spinning wheel"></canvas>
+          <div class="reactions" id="reactions" aria-hidden="true"></div>
           <button type="button" class="hub" id="hub" tabindex="-1" aria-hidden="true">Spin</button>
         </div>
 
@@ -50,9 +51,12 @@
         <div class="live-top">
           <span class="live-dot" id="live-dot" aria-hidden="true"></span>
           <strong id="live-text">Connecting…</strong>
+          <small class="live-rtt" id="live-rtt" title="Round-trip time to the server"></small>
           <button type="button" class="link" id="live-leave">Leave room</button>
         </div>
         <ul class="peers" id="live-peers" aria-label="People in this room"></ul>
+        <div class="react-bar" id="live-react" role="group" aria-label="Send a reaction"></div>
+        <ul class="activity" id="live-activity" aria-live="off"></ul>
         <div class="live-row">
           <input type="text" id="live-name" maxlength="24" placeholder="Your name" aria-label="Your name">
           <button type="button" class="btn ghost" id="live-copy">Copy invite link</button>

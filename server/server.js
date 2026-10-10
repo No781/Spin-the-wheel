@@ -35,12 +35,14 @@ const LIMITS = {
   history: 12,
   payload: 16 * 1024,
   idleDays: 30,
+  reactions: 6,      // number of emoji the client offers
   burst: 60,         // message bucket size
   refillPerSec: 30,  // messages per second, sustained
 };
 
 const TAU = Math.PI * 2;
 const ID_RE = /^[a-z0-9]{4,16}$/;
+const STATUSES = ['active', 'idle', 'away'];
 const ROOM_RE = /^[a-z0-9]{6,24}$/;
 const SPIN_LEAD_MS = 500;   // gives every client time to get the message before the wheel starts
 const SPIN_TAIL_MS = 250;   // grace after the animation ends before edits are allowed again
@@ -182,7 +184,9 @@ const publicSpin = (s) => ({
   fromRot: s.fromRot, delta: s.delta, startAt: s.startAt, duration: s.duration,
 });
 
-const peersOf = (room) => [...room.clients].map((c) => ({ id: c.id, name: c.name, focus: c.focus }));
+const peersOf = (room) => [...room.clients].map((c) => ({
+  id: c.id, name: c.name, focus: c.focus, status: c.status, since: c.since,
+}));
 
 function send(client, msg) {
   if (client.ws.readyState === 1) client.ws.send(JSON.stringify(msg));
@@ -319,7 +323,11 @@ httpServer.on('upgrade', (req, socket, head) => {
 
 wss.on('connection', (ws) => {
   ipCounts.set(ws.ip, (ipCounts.get(ws.ip) || 0) + 1);
-  const client = { id: clientId(), ws, room: null, name: 'Guest', focus: null, tokens: LIMITS.burst, refilled: Date.now() };
+  const client = {
+    id: clientId(), ws, room: null, name: 'Guest', focus: null,
+    status: 'active', since: Date.now(), lastReact: 0, // presence: active | idle | away
+    tokens: LIMITS.burst, refilled: Date.now(),
+  };
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
   // Protocol errors (oversize frames, bad frames) surface here; without a listener they would crash the process.
@@ -361,7 +369,7 @@ setInterval(() => {
     ws.isAlive = false;
     ws.ping();
   }
-}, 30000).unref();
+}, 15000).unref();
 
 function handle(client, msg) {
   if (msg.t === 'ping') return send(client, { t: 'pong', c: msg.c, s: Date.now() });
@@ -426,6 +434,19 @@ function handle(client, msg) {
     case 'name': {
       client.name = cleanText(msg.name, LIMITS.peerNameLen).trim() || 'Guest';
       return broadcast(room, { t: 'peers', peers: peersOf(room) });
+    }
+    case 'status': {
+      if (!STATUSES.includes(msg.s) || msg.s === client.status) return;
+      client.status = msg.s;
+      client.since = Date.now();
+      return broadcast(room, { t: 'presence', id: client.id, status: client.status, since: client.since }, client);
+    }
+    case 'react': {
+      // Reactions are an index into a fixed emoji list kept on the client, so no free text travels.
+      const now = Date.now();
+      if (!Number.isInteger(msg.i) || msg.i < 0 || msg.i >= LIMITS.reactions || now - client.lastReact < 300) return;
+      client.lastReact = now;
+      return broadcast(room, { t: 'react', by: client.id, i: msg.i }, client);
     }
     case 'sync':
       return send(client, { t: 'snapshot', room: snapshot(room) });
