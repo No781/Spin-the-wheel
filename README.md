@@ -49,43 +49,57 @@ Open it in two browser windows, click **Go live together** in one, and open the 
 
 Built-in protections: connections must come from an allowed origin, messages are size- and rate-limited, there are caps on rooms, people per room, options per room and connections per IP, option names are always rendered as plain text, and the server only serves a fixed list of public files.
 
-## Deploying on your own server
+## Deploying on your own server (next to an existing site)
 
-These steps assume a Debian or Ubuntu VPS where you have root. You'll need a domain (or subdomain) pointing at the server: browsers need HTTPS for the clipboard and for secure WebSockets (`wss://`).
+`deploy/install.sh` sets everything up on an Ubuntu/Debian server **without disturbing sites that are already running there**.
 
-1. **Install Node 20+ and Caddy** (Caddy handles HTTPS certificates for you):
-   ```sh
-   curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-   sudo apt-get install -y nodejs git
-   sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
-   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-   sudo apt-get update && sudo apt-get install -y caddy
-   ```
-2. **Create a service user and get the code**:
-   ```sh
-   sudo useradd --system --create-home --home-dir /opt/spin-the-wheel --shell /usr/sbin/nologin wheel
-   sudo -u wheel git clone <your repo url> /opt/spin-the-wheel/app
-   ```
-   (For a private repo, add a read-only deploy key, or copy the folder up with `rsync` instead.)
-3. **Install dependencies**:
-   ```sh
-   cd /opt/spin-the-wheel/app/server && sudo -u wheel npm ci --omit=dev
-   ```
-4. **Start it as a service**:
-   ```sh
-   sudo cp /opt/spin-the-wheel/app/deploy/spin-the-wheel.service /etc/systemd/system/
-   sudo systemctl daemon-reload && sudo systemctl enable --now spin-the-wheel
-   curl http://127.0.0.1:8080/healthz    # should print: ok
-   ```
-5. **Put HTTPS in front**: copy `deploy/Caddyfile` to `/etc/caddy/Caddyfile`, put your domain in it, then `sudo systemctl reload caddy`. Open ports 80 and 443 (for example `sudo ufw allow 80,443/tcp`).
-6. **Update later**:
-   ```sh
-   cd /opt/spin-the-wheel/app && sudo -u wheel git pull
-   cd server && sudo -u wheel npm ci --omit=dev && sudo systemctl restart spin-the-wheel
-   ```
+### Use a subdomain
 
-Check logs with `journalctl -u spin-the-wheel -f`. Rooms are kept in `/var/lib/spin-the-wheel/rooms.json`.
+Serve the wheel on its own subdomain (for example `wheel.example.com`), not under a path like `example.com/wheel`. A subdomain gets its own separate web server config, so your existing site's config isn't edited at all, and the browser keeps the two sites' stored data apart. The live connection (`/ws`) is also built for a site root. All you need is one DNS record: an `A` record for `wheel` pointing at the same IP as your main domain.
+
+### Check what your server runs (read-only)
+
+```sh
+sudo ss -tlnp | grep -E ':(80|443)\s'                      # which program owns the web ports
+systemctl is-active nginx apache2 caddy                     # which web servers are running
+sudo nginx -T 2>/dev/null | grep -E 'server_name|listen'    # if nginx: the sites it serves
+```
+
+The installer runs the same detection itself and adapts: with **nginx** it adds one new site; with Apache, Caddy or anything else it installs only the app and prints the config to add by hand; with no web server at all it installs nginx.
+
+### Install
+
+1. Create the DNS record for the subdomain.
+2. Get this repo onto the server (`git clone`, or copy the folder with `scp`/`rsync`; a private repo needs a read-only deploy key).
+3. See what would happen first. This changes nothing:
+   ```sh
+   cd Spin-the-wheel
+   sudo ./deploy/install.sh --domain wheel.example.com --email you@example.com --dry-run
+   ```
+4. Install for real (it asks for confirmation; add `--yes` to skip that):
+   ```sh
+   sudo ./deploy/install.sh --domain wheel.example.com --email you@example.com
+   ```
+5. Verify. It checks the app, nginx, HTTPS, the certificate, a real WebSocket round trip, and that your other site still answers:
+   ```sh
+   sudo /opt/spin-the-wheel/app/deploy/check.sh
+   ```
+   If anything fails, paste its output into the conversation to get help.
+
+Options: `--port N` (default: first free port from 8080), `--no-tls` (HTTP only), `--no-web` (app only, print the proxy config), `--dry-run`, `--yes`.
+
+### What it does, and what it never does
+
+It does: create an unprivileged `spinwheel` user, copy the app to `/opt/spin-the-wheel/app` (read-only for the service), install a **private** copy of Node under `/opt/spin-the-wheel/node` (checksum verified; your system Node is not touched), run the app as a systemd service on `127.0.0.1` only, add one nginx site file for the domain, and get a Let's Encrypt certificate with certbot (installing the `certbot` package if you don't have it).
+
+It never: edits your existing nginx files, installs a second web server over yours, changes firewall rules or upgrades system packages. Before reloading nginx it runs `nginx -t`, and if nginx rejects the new site it removes it again and reloads nothing. It refuses to run if your existing nginx config is already broken or if another site already uses the domain. The reload is graceful (no restart, no downtime for your other sites).
+
+### Update, uninstall, troubleshoot
+
+- **Update:** `git pull`, then run `install.sh` again with the same options. It's safe to repeat, keeps your `config.js` and your saved rooms, and restarts only the wheel.
+- **Uninstall:** `sudo /opt/spin-the-wheel/app/deploy/uninstall.sh` removes the service and its nginx site and keeps saved rooms; add `--purge` to delete those and the service user as well. The certificate is left (remove it with `sudo certbot delete --cert-name <domain>`).
+- **Logs:** `journalctl -u spin-the-wheel -f`. Rooms are saved in `/var/lib/spin-the-wheel/rooms.json`.
+- **Renewal:** certbot renews certificates by itself (a systemd timer or cron job, set up by its package). `check.sh` tells you whether one exists.
 
 ### Keeping the page elsewhere
 

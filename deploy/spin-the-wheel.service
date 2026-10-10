@@ -1,24 +1,23 @@
-# systemd unit for the Spin the Wheel server.
-# Install:  sudo cp spin-the-wheel.service /etc/systemd/system/ && sudo systemctl daemon-reload
-#           sudo systemctl enable --now spin-the-wheel
+# systemd unit template for Spin the Wheel. deploy/install.sh fills in the @PLACEHOLDERS@ and installs it as
+# /etc/systemd/system/spin-the-wheel.service. You normally don't copy this file by hand.
 [Unit]
 Description=Spin the Wheel (site + realtime rooms)
 After=network.target
 
 [Service]
 Type=simple
-User=wheel
-Group=wheel
-WorkingDirectory=/opt/spin-the-wheel/app/server
-ExecStart=/usr/bin/node server.js
+User=@USER@
+Group=@USER@
+WorkingDirectory=@APP_DIR@/server
+ExecStart=@NODE_BIN@ server.js
 Restart=always
 RestartSec=2
 
-# Listen only on localhost; Caddy terminates HTTPS and proxies to us.
+# Listen only on localhost; the web server (nginx) proxies public traffic to it.
 Environment=NODE_ENV=production
 Environment=HOST=127.0.0.1
-Environment=PORT=8080
-# We sit behind a reverse proxy, so take the client IP from X-Forwarded-For (used for per-IP limits).
+Environment=PORT=@PORT@
+# We sit behind a reverse proxy that overwrites X-Forwarded-For, so use it for per-IP limits.
 Environment=TRUST_PROXY=1
 # systemd creates /var/lib/spin-the-wheel owned by the service user. Rooms are saved here.
 StateDirectory=spin-the-wheel

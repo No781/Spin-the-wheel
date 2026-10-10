@@ -1,6 +1,0 @@
-# Replace wheel.example.com with your domain (its DNS A/AAAA record must point at this server).
-# Caddy gets and renews the HTTPS certificate by itself and proxies WebSockets automatically.
-wheel.example.com {
-	encode zstd gzip
-	reverse_proxy 127.0.0.1:8080
-}
