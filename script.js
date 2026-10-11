@@ -4,6 +4,7 @@
   const TAU = Math.PI * 2;
   const STORAGE_KEY = 'spin-the-wheel:v1';
   const MAX_OPTIONS = 60;
+  const MAX_NAME = 100; // longest option name (the server enforces the same limit)
   const FONT = '"DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif';
 
   // Coastal palette: sea blues, forest mosses and driftwood browns, alternating families so neighbours differ.
@@ -92,7 +93,7 @@
     const out = [];
     for (const row of data.slice(0, MAX_OPTIONS)) {
       if (!Array.isArray(row)) continue;
-      out.push(makeOption(String(row[0] ?? '').slice(0, 60), cleanWeight(row[1])));
+      out.push(makeOption(String(row[0] ?? '').slice(0, MAX_NAME), cleanWeight(row[1])));
     }
     return out;
   }
@@ -118,7 +119,7 @@
       const d = b64Decode(encoded);
       if (!d || typeof d.k !== 'string' || !/^[A-Za-z0-9_-]{4,40}$/.test(d.k)) return null;
       if (!Array.isArray(d.o) || d.o.length < 2 || d.o.length > MAX_OPTIONS) return null;
-      const o = d.o.map((r) => [String(r[0] ?? '').trim().slice(0, 60), cleanWeight(r[1])]).filter((r) => r[0] && r[1] > 0);
+      const o = d.o.map((r) => [String(r[0] ?? '').trim().slice(0, MAX_NAME), cleanWeight(r[1])]).filter((r) => r[0] && r[1] > 0);
       if (o.length < 2) return null;
       return { t: String(d.t || '').slice(0, 80), n: String(d.n || '').slice(0, 40), k: d.k, o };
     } catch (_) { return null; }
@@ -190,7 +191,7 @@
           state.history = raw.history
             .filter((h) => h && typeof h.name === 'string')
             .slice(0, 12)
-            .map((h) => ({ name: h.name.slice(0, 60), color: typeof h.color === 'string' ? h.color : PALETTE[0] }));
+            .map((h) => ({ name: h.name.slice(0, MAX_NAME), color: typeof h.color === 'string' ? h.color : PALETTE[0] }));
         }
       }
     } catch (_) { /* ignore corrupt storage */ }
@@ -245,6 +246,76 @@
     const l = luminance(hex);
     const contrast = (other) => (Math.max(l, other) + 0.05) / (Math.min(l, other) + 0.05);
     return contrast(luminance(INK_DARK)) >= contrast(luminance(INK_LIGHT)) ? INK_DARK : INK_LIGHT;
+  }
+
+  /* ---------------- wheel label layout ---------------- */
+
+  const LINE_H = 1.15;
+  const MIN_FS = 9;
+  const labelCache = new Map();
+
+  // Greedy word wrap with the current ctx.font; words wider than a line are broken. Null if it needs more than maxLines.
+  function wrapLabel(text, maxW, maxLines) {
+    const lines = [];
+    let cur = '';
+    for (const word of text.split(/\s+/)) {
+      let w = word;
+      while (ctx.measureText(w).width > maxW) {
+        let cut = w.length - 1;
+        while (cut > 1 && ctx.measureText(w.slice(0, cut)).width > maxW) cut--;
+        if (cur) { lines.push(cur); cur = ''; }
+        lines.push(w.slice(0, cut));
+        w = w.slice(cut);
+        if (lines.length > maxLines) return null;
+      }
+      const next = cur ? `${cur} ${w}` : w;
+      if (ctx.measureText(next).width <= maxW) cur = next;
+      else { lines.push(cur); cur = w; }
+    }
+    if (cur) lines.push(cur);
+    return lines.length <= maxLines ? lines : null;
+  }
+
+  function computeLabel(text, maxW, arcW, maxFs) {
+    if (!text) return null;
+    // For 1, 2 and 3 lines find the largest font that fits, then keep the candidate with the biggest text.
+    let best = null;
+    for (let n = 1; n <= 3; n++) {
+      const cap = Math.min(maxFs, (arcW * 0.92) / (n * LINE_H));
+      if (cap < MIN_FS) break;
+      for (let fs = cap; fs >= MIN_FS; fs -= 0.5) {
+        ctx.font = `600 ${fs}px ${FONT}`;
+        const lines = wrapLabel(text, maxW, n);
+        if (lines) {
+          if (!best || fs > best.fs + 0.01) best = { fs, lines };
+          break;
+        }
+      }
+    }
+    if (best) return best;
+
+    // Doesn't fit even at the smallest size: use as many lines as the slice allows and shorten the last one.
+    const n = Math.min(3, Math.floor((arcW * 0.92) / (MIN_FS * LINE_H)));
+    if (n < 1) return null;
+    ctx.font = `600 ${MIN_FS}px ${FONT}`;
+    const all = wrapLabel(text, maxW, Infinity);
+    const lines = all.slice(0, n);
+    if (all.length > n) {
+      let last = lines[n - 1];
+      while (last.length > 1 && ctx.measureText(`${last}…`).width > maxW) last = last.slice(0, -1);
+      lines[n - 1] = `${last.trimEnd()}…`;
+    }
+    return { fs: MIN_FS, lines };
+  }
+
+  // Layouts only change when the text or the wheel size changes, so remember them between animation frames.
+  function labelLayout(text, maxW, arcW, maxFs) {
+    const key = `${text}|${Math.round(maxW)}|${Math.round(arcW)}|${Math.round(maxFs * 10)}`;
+    if (labelCache.has(key)) return labelCache.get(key);
+    const out = computeLabel(text, maxW, arcW, maxFs);
+    if (labelCache.size > 500) labelCache.clear();
+    labelCache.set(key, out);
+    return out;
   }
 
   function draw() {
@@ -306,27 +377,23 @@
       a += span;
     });
 
-    // labels
+    // labels: long names wrap onto up to three lines and shrink to fit; "…" is only a last resort
     const textEdge = R - size * 0.04;
     const maxW = textEdge - size * 0.13;
     const innerR = textEdge - maxW * 0.5;
     act.forEach((o, i) => {
       const [s, e] = bounds[i];
       const span = e - s;
-      const fs = Math.min(size * 0.052, span * innerR * 0.5);
-      if (fs < 8.5) return;
+      const layout = labelLayout(o.name.trim(), maxW, span * innerR, size * 0.052);
+      if (!layout) return;
       ctx.save();
       ctx.rotate(s + span / 2);
-      ctx.font = `600 ${fs}px ${FONT}`;
+      ctx.font = `600 ${layout.fs}px ${FONT}`;
       ctx.textAlign = 'right';
       ctx.textBaseline = 'middle';
       ctx.fillStyle = inkOn(colors.get(o.id));
-      let label = o.name.trim();
-      if (ctx.measureText(label).width > maxW) {
-        while (label.length > 1 && ctx.measureText(label + '…').width > maxW) label = label.slice(0, -1);
-        label = label.trimEnd() + '…';
-      }
-      ctx.fillText(label, textEdge, 0);
+      const lineH = layout.fs * LINE_H;
+      layout.lines.forEach((line, k) => ctx.fillText(line, textEdge, (k - (layout.lines.length - 1) / 2) * lineH));
       ctx.restore();
     });
 
@@ -606,7 +673,7 @@
 
   const ROW_HTML = `
     <span class="opt-dot" aria-hidden="true"></span>
-    <input class="opt-name" type="text" maxlength="60" placeholder="Option name" aria-label="Option name">
+    <textarea class="opt-name" rows="1" maxlength="${MAX_NAME}" placeholder="Option name" aria-label="Option name"></textarea>
     <input class="opt-weight" type="number" min="0" step="any" inputmode="decimal" aria-label="Weight">
     <output class="opt-pct">0%</output>
     <button type="button" class="opt-remove">&times;</button>
@@ -622,9 +689,17 @@
     return li;
   }
 
+  // Grows a name box to fit its text (the names wrap instead of being cut off).
+  function autosize(el) {
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }
+  const autosizeAll = () => els.list.querySelectorAll('.opt-name').forEach(autosize);
+
   function renderList() {
     els.list.textContent = '';
     state.options.forEach((o) => els.list.appendChild(rowFor(o)));
+    autosizeAll();
     updateDerived();
     if (live) renderFocus();
   }
@@ -663,7 +738,13 @@
     const li = e.target.closest('.opt');
     const o = li && state.options.find((x) => x.id === li.dataset.id);
     if (!o) return;
-    if (e.target.matches('.opt-name')) { o.name = e.target.value; emit({ op: 'set', id: o.id, name: o.name }); }
+    if (e.target.matches('.opt-name')) {
+      const oneLine = e.target.value.replace(/\s*[\r\n]+\s*/g, ' ');
+      if (oneLine !== e.target.value) e.target.value = oneLine;
+      o.name = oneLine;
+      autosize(e.target);
+      emit({ op: 'set', id: o.id, name: o.name });
+    }
     else if (e.target.matches('.opt-weight')) { o.weight = cleanWeight(e.target.value); emit({ op: 'set', id: o.id, weight: o.weight }); }
     else return;
     updateDerived();
@@ -771,7 +852,40 @@
   els.hub.addEventListener('click', spin);
 
   new ResizeObserver(draw).observe(els.wrap);
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => { labelCache.clear(); autosizeAll(); draw(); });
+  }
+  new ResizeObserver(() => requestAnimationFrame(autosizeAll)).observe(els.list); // names re-wrap when the panel gets narrower or wider
+
+  // Pressing Enter in a name moves on to its weight (names are single-line); IME composition is left alone.
+  els.list.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.isComposing || !e.target.matches('.opt-name')) return;
+    e.preventDefault();
+    e.target.closest('.opt').querySelector('.opt-weight').focus();
+  });
+
+  // Hover (desktop) or tap (phone) a slice to see its full name and chance, whatever the label looks like.
+  function sliceAtPoint(ev) {
+    const rect = els.canvas.getBoundingClientRect();
+    const size = rect.width;
+    const c = size / 2;
+    const dx = ev.clientX - rect.left - c;
+    const dy = ev.clientY - rect.top - c;
+    if (Math.hypot(dx, dy) > c - size * 0.064) return null; // outside the wheel itself
+    const act = active();
+    if (!act.length) return null;
+    const total = act.reduce((sum, o) => sum + o.weight, 0);
+    const o = act[sliceIndexAt(mod(Math.atan2(dy, dx) - rotation, TAU), act, total)];
+    return `${o.name.trim()} · ${fmtPct((o.weight / total) * 100)}`;
+  }
+  els.canvas.addEventListener('pointermove', (e) => {
+    if (e.pointerType === 'touch') return;
+    els.canvas.title = spinning ? '' : sliceAtPoint(e) || '';
+  });
+  els.canvas.addEventListener('click', (e) => {
+    const info = spinning ? null : sliceAtPoint(e);
+    if (info) toast(info);
+  });
 
   /* ---------------- sending links ---------------- */
 
@@ -1081,7 +1195,7 @@
   function setInputValue(input, value) {
     const text = String(value);
     if (input.value === text) return;
-    const keepCaret = document.activeElement === input && input.type === 'text';
+    const keepCaret = document.activeElement === input && (input.type === 'text' || input.type === 'textarea');
     const [a, b] = keepCaret ? [input.selectionStart, input.selectionEnd] : [0, 0];
     input.value = text;
     if (keepCaret) input.setSelectionRange(Math.min(a, text.length), Math.min(b, text.length));
@@ -1094,12 +1208,18 @@
         if (state.options.some((o) => o.id === op.id)) return;
         state.options.push(makeOption(op.name, op.weight, op.id));
         els.list.appendChild(rowFor(state.options[state.options.length - 1]));
+        autosize(els.list.lastElementChild.querySelector('.opt-name'));
         break;
       case 'set': {
         const o = state.options.find((x) => x.id === op.id);
         const li = els.list.querySelector(`.opt[data-id="${op.id}"]`);
         if (!o || !li) return;
-        if ('name' in op) { o.name = op.name; setInputValue(li.querySelector('.opt-name'), op.name); }
+        if ('name' in op) {
+          o.name = op.name;
+          const box = li.querySelector('.opt-name');
+          setInputValue(box, op.name);
+          autosize(box);
+        }
         if ('weight' in op) { o.weight = op.weight; setInputValue(li.querySelector('.opt-weight'), op.weight); }
         break;
       }

@@ -27,7 +27,7 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map((s) =
 
 const LIMITS = {
   options: 60,
-  nameLen: 60,
+  nameLen: 100,
   peerNameLen: 24,
   clientsPerRoom: 50,
   rooms: 5000,
