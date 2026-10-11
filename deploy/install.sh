@@ -212,8 +212,9 @@ install_node() {
   fi
   if [ "$DRY" = 1 ]; then info "[dry-run] would download the latest Node 22 LTS ($NODE_ARCH) from nodejs.org, verify its checksum, unpack to $NODE_DIR"; return; fi
   command -v xz >/dev/null || apt-get install -y xz-utils
-  local base=https://nodejs.org/dist/latest-v22.x line sum file tmp
-  line="$(curl -fsSL "$base/SHASUMS256.txt" | grep -E "linux-${NODE_ARCH}\.tar\.xz\$" | head -1)" || die "Couldn't read the Node release list from nodejs.org"
+  local base=https://nodejs.org/dist/latest-v22.x sums line sum file tmp
+  sums="$(curl -fsSL "$base/SHASUMS256.txt")" || die "Couldn't read the Node release list from nodejs.org"
+  line="$(grep -m1 -E "linux-${NODE_ARCH}\.tar\.xz\$" <<<"$sums")" || die "No Node build for $NODE_ARCH in the release list"
   sum="${line%% *}"; file="${line##* }"
   tmp="$(mktemp -d)"
   curl -fsSL "$base/$file" -o "$tmp/$file" || die "Couldn't download $file"
@@ -274,10 +275,10 @@ EOF
 
 # Debian/Ubuntu keep sites in sites-available + sites-enabled; others use conf.d. Use whichever nginx actually loads.
 pick_nginx_layout() {
-  if [ -d "$NGINX_DIR/sites-available" ] && printf '%s\n' "$NGINX_DUMP" | grep -Eq 'include[[:space:]]+[^;]*sites-enabled'; then
+  if [ -d "$NGINX_DIR/sites-available" ] && grep -Eq 'include[[:space:]]+[^;]*sites-enabled' <<<"$NGINX_DUMP"; then
     VHOST_FILE="$NGINX_DIR/sites-available/$DOMAIN"
     VHOST_ACTIVE="$NGINX_DIR/sites-enabled/$DOMAIN"
-  elif [ -d "$NGINX_DIR/conf.d" ] && printf '%s\n' "$NGINX_DUMP" | grep -Eq 'include[[:space:]]+[^;]*conf\.d'; then
+  elif [ -d "$NGINX_DIR/conf.d" ] && grep -Eq 'include[[:space:]]+[^;]*conf\.d' <<<"$NGINX_DUMP"; then
     VHOST_FILE="$NGINX_DIR/conf.d/$DOMAIN.conf"
     VHOST_ACTIVE="$VHOST_FILE"
   else
@@ -417,7 +418,7 @@ setup_nginx() {
     die "$VHOST_FILE exists and wasn't created by this installer; not overwriting it."
   fi
   IPV6=0
-  if [ -e /proc/net/if_inet6 ] && printf '%s\n' "$NGINX_DUMP" | grep -Eq 'listen[[:space:]]+\[::\]'; then IPV6=1; fi
+  if [ -e /proc/net/if_inet6 ] && grep -Eq 'listen[[:space:]]+\[::\]' <<<"$NGINX_DUMP"; then IPV6=1; fi
 
   act install -d -m 755 "$ACME_ROOT"
   apply_vhost http

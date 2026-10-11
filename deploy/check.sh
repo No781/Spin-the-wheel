@@ -68,7 +68,9 @@ case "$listening" in
 esac
 
 if [ "$(curl -fsS -m 5 "http://127.0.0.1:$PORT/healthz" 2>/dev/null)" = "ok" ]; then pass "/healthz answers"; else fail "/healthz did not answer 'ok'"; fi
-if curl -fsS -m 5 "http://127.0.0.1:$PORT/" 2>/dev/null | grep -q '<title>Spin the Wheel'; then pass "the page is served"; else fail "the page was not served"; fi
+# (match on a captured copy: `curl | grep -q` can fail spuriously under pipefail when grep exits before curl finishes writing)
+page="$(curl -fsS -m 5 "http://127.0.0.1:$PORT/" 2>/dev/null)"
+if grep -q '<title>Spin the Wheel' <<<"$page"; then pass "the page is served"; else fail "the page was not served"; fi
 for f in /server/server.js /.git/config /server/data/rooms.json; do
   code="$(curl -s -o /dev/null -m 5 -w '%{http_code}' "http://127.0.0.1:$PORT$f" 2>/dev/null)"
   if [ "$code" = 404 ]; then pass "private path $f is not served (404)"; else fail "$f returned $code, expected 404"; fi
@@ -101,7 +103,8 @@ if command -v nginx >/dev/null 2>&1; then
   if out="$(nginx -t 2>&1)"; then pass "nginx -t: configuration is valid"
   else fail "nginx -t reports a problem: $(printf '%s' "$out" | tr '\n' ' ')"; fi
   if [ -n "$DOMAIN" ]; then
-    if nginx -T 2>/dev/null | grep -Eq "server_name[[:space:]]+[^;]*[[:space:]]?${DOMAIN//./\\.}[[:space:];]"; then pass "nginx has a site for $DOMAIN"
+    nginx_dump="$(nginx -T 2>/dev/null)"
+    if grep -Eq "server_name[[:space:]]+[^;]*[[:space:]]?${DOMAIN//./\\.}[[:space:];]" <<<"$nginx_dump"; then pass "nginx has a site for $DOMAIN"
     else fail "nginx has no site for $DOMAIN"; fi
   fi
 else
@@ -133,7 +136,8 @@ if [ -n "$DOMAIN" ]; then
       fail "could not read the certificate served for $DOMAIN"
     fi
 
-    if systemctl list-timers --all 2>/dev/null | grep -q certbot || [ -e /etc/cron.d/certbot ]; then
+    timers="$(systemctl list-timers --all 2>/dev/null)"
+    if grep -q certbot <<<"$timers" || [ -e /etc/cron.d/certbot ]; then
       note "automatic certificate renewal is scheduled (certbot timer or cron). To test it: sudo certbot renew --dry-run"
     else
       note "no certbot renewal timer found. Certificates last 90 days, so check: systemctl list-timers | grep certbot, and: sudo certbot renew --dry-run"
